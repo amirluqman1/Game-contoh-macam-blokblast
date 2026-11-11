@@ -12,6 +12,9 @@ Buka `index.html` dalam browser (phone pun boleh).
 - Tak ada blok yang muat → kalah
 
 ## Blok yang keluar
-Random, dengan sedikit bantuan. Bila papan dah lebih 30% penuh, peluang dapat blok kecil naik sikit demi sikit (paling tinggi bila papan 65% penuh). Game tak pernah sengaja bagi blok susah.
+Random, dengan bantuan bila papan sesak (game tak pernah sengaja bagi blok susah):
 
-Rekod terbaik dan game yang tengah main disimpan auto dalam browser.
+1. **Saiz blok** – bila papan dah lebih 30% penuh, peluang dapat blok kecil naik sikit demi sikit (paling tinggi bila 65% penuh).
+2. **Ikut bentuk papan** – bila papan sesak, game cabut sampai 8 set calon dan "cuba letak" setiap set dalam simulasi. Set yang ketiga-tiga bloknya boleh muat dan boleh letupkan paling banyak baris yang diberi.
+
+Papan masih lapang = random biasa (cuma pastikan sekurang-kurangnya satu blok muat).

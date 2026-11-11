@@ -123,15 +123,83 @@
     return { shape: SHAPES[k], color: 1 + Math.floor(Math.random() * COLORS) };
   }
 
-  function newTray() {
-    // Cuba bagi set yang sekurang-kurangnya satu blok boleh muat
-    const help = helpLevel();
-    let set;
-    for (let t = 0; t < 20; t++) {
-      set = [randomPiece(help), randomPiece(help), randomPiece(help)];
-      if (set.some((p) => canFitAnywhere(p.shape))) break;
+  // SIM-START: simulasi papan untuk pilih set blok yang membantu (tak sentuh papan sebenar)
+  function simFits(g, shape, r0, c0) {
+    for (let r = 0; r < shape.length; r++) for (let c = 0; c < shape[0].length; c++) {
+      if (!shape[r][c]) continue;
+      const R = r0 + r, C = c0 + c;
+      if (R < 0 || C < 0 || R >= N || C >= N || g[R][C]) return false;
     }
-    tray = set;
+    return true;
+  }
+
+  // Letak blok di tempat terbaik: utamakan letup baris, lepas tu yang paling "kemas" (rapat dinding/blok lain)
+  function simBestPlace(g, shape) {
+    let best = null;
+    for (let r0 = 0; r0 <= N - shape.length; r0++) for (let c0 = 0; c0 <= N - shape[0].length; c0++) {
+      if (!simFits(g, shape, r0, c0)) continue;
+      const t = g.map((row) => row.slice());
+      let snug = 0;
+      shape.forEach((row, r) => row.forEach((v, c) => {
+        if (!v) return;
+        const R = r0 + r, C = c0 + c;
+        t[R][C] = 1;
+        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const y = R + dr, x = C + dc;
+          if (y < 0 || x < 0 || y >= N || x >= N || g[y][x]) snug++;
+        }
+      }));
+      const rows = [], cols = [];
+      for (let i = 0; i < N; i++) {
+        if (t[i].every(Boolean)) rows.push(i);
+        if (t.every((row) => row[i])) cols.push(i);
+      }
+      const score = (rows.length + cols.length) * 100 + snug;
+      if (!best || score > best.score) {
+        rows.forEach((i) => t[i].fill(0));
+        cols.forEach((i) => t.forEach((row) => { row[i] = 0; }));
+        best = { score, lines: rows.length + cols.length, grid: t };
+      }
+    }
+    return best;
+  }
+
+  // Boleh ke ketiga-tiga blok diletak (cuba semua 6 susunan)? Berapa baris boleh letup?
+  function simRateSet(g, shapes) {
+    const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    let best = { placed: 0, lines: 0 };
+    for (const o of orders) {
+      let cur = g, placed = 0, lines = 0;
+      for (const k of o) {
+        const b = simBestPlace(cur, shapes[k]);
+        if (!b) break;
+        cur = b.grid; placed++; lines += b.lines;
+      }
+      if (placed > best.placed || (placed === best.placed && lines > best.lines)) best = { placed, lines };
+      if (placed === 3 && lines >= 3) break;
+    }
+    return best;
+  }
+  // SIM-END
+
+  function newTray() {
+    const help = helpLevel();
+    const candidates = [];
+    // Papan lapang: 1 set random (asal ada yang muat). Papan sesak: sampai 8 set calon, pilih yang paling membantu.
+    const want = 1 + Math.round(help * 7);
+    for (let t = 0; t < 40 && candidates.length < want; t++) {
+      const set = [randomPiece(help), randomPiece(help), randomPiece(help)];
+      if (set.some((p) => canFitAnywhere(p.shape))) candidates.push(set);
+    }
+    if (!candidates.length) candidates.push([randomPiece(help), randomPiece(help), randomPiece(help)]);
+    if (candidates.length === 1) { tray = candidates[0]; return; }
+    let best = null, bestScore = -1;
+    for (const set of candidates) {
+      const r = simRateSet(grid, set.map((p) => p.shape));
+      const score = r.placed * 1000 + r.lines * 50 + Math.random() * 10;
+      if (score > bestScore) { bestScore = score; best = set; }
+    }
+    tray = best;
   }
 
   function pieceEl(p, cls = 'piece') {
