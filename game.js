@@ -160,15 +160,48 @@
       for (let i = 0; i < d.length; i += 4) if (Math.random() < 0.05) { d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.max(d[i + 3], 28); }
       g.putImageData(im, 0, 0);
     }
-    return cv.toDataURL();
+    return cv;
   }
+  // Bakar warna + tekstur jadi SATU gambar setiap warna. Blok guna gambar ni terus (ringan),
+  // dan kepingan pecah dilukis dari gambar yang sama.
+  const BAKED = {};
   (function installTextures() {
     try {
-      const css = SKINS.map((k) => `body[data-skin="${k.id}"]{--tex-img:url(${makeTexture(k.id)})}`).join('\n');
+      const prev = document.body.dataset.skin;
+      const probes = [1, 2, 3, 4].map((n) => {
+        const d = document.createElement('div');
+        d.className = 'c' + n;
+        d.style.display = 'none';
+        document.body.appendChild(d);
+        return d;
+      });
+      let css = '';
+      SKINS.forEach((k) => {
+        document.body.dataset.skin = k.id;
+        const tex = makeTexture(k.id);
+        BAKED[k.id] = {};
+        probes.forEach((d, i) => {
+          const cs = getComputedStyle(d);
+          const hi = cs.getPropertyValue('--hi').trim(), lo = cs.getPropertyValue('--lo').trim();
+          const cv = document.createElement('canvas');
+          cv.width = cv.height = 128;
+          const g = cv.getContext('2d');
+          const gr = g.createLinearGradient(0, 0, 128, 128);
+          gr.addColorStop(0, hi); gr.addColorStop(1, lo);
+          g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+          g.globalCompositeOperation = k.id === 'kaca' ? 'source-over' : 'overlay';
+          g.drawImage(tex, 0, 0);
+          BAKED[k.id][i + 1] = cv;
+          const url = k.id === 'kaca' ? cv.toDataURL('image/png') : cv.toDataURL('image/jpeg', 0.88);
+          css += `body[data-skin="${k.id}"] .c${i + 1}{--baked:url(${url})}\n`;
+        });
+      });
+      probes.forEach((d) => d.remove());
+      document.body.dataset.skin = prev || 'batu';
       const st = document.createElement('style');
       st.textContent = css;
       document.head.appendChild(st);
-    } catch (e) { /* canvas tak boleh guna: kekal tanpa tekstur */ }
+    } catch (e) { /* canvas tak boleh guna: kekal warna biasa */ }
   })();
 
   // ---------- papan ----------
@@ -251,36 +284,51 @@
     return true;
   }
 
-  // Letak blok di tempat terbaik: utamakan letup baris, lepas tu yang paling "kemas" (rapat dinding/blok lain)
+  // Letak blok di tempat terbaik: utamakan letup banyak baris serentak, lepas tu yang paling "kemas"
+  // (rapat dinding/blok lain). Laju: tak salin papan untuk setiap kedudukan, kira guna bilangan per baris/lajur.
+  const addR = new Int8Array(N), addC = new Int8Array(N);
   function simBestPlace(g, shape) {
-    let best = null;
-    for (let r0 = 0; r0 <= N - shape.length; r0++) for (let c0 = 0; c0 <= N - shape[0].length; c0++) {
-      if (!simFits(g, shape, r0, c0)) continue;
-      const t = g.map((row) => row.slice());
+    const rowCnt = new Int8Array(N), colCnt = new Int8Array(N);
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (g[r][c]) { rowCnt[r]++; colCnt[c]++; }
+    const pts = [];
+    shape.forEach((row, r) => row.forEach((v, c) => { if (v) pts.push(r, c); }));
+    const H = shape.length, W = shape[0].length;
+    let bestScore = -1, br = 0, bc = 0, bl = 0;
+    for (let r0 = 0; r0 <= N - H; r0++) for (let c0 = 0; c0 <= N - W; c0++) {
+      let ok = true;
+      for (let i = 0; i < pts.length; i += 2) if (g[r0 + pts[i]][c0 + pts[i + 1]]) { ok = false; break; }
+      if (!ok) continue;
       let snug = 0;
-      shape.forEach((row, r) => row.forEach((v, c) => {
-        if (!v) return;
-        const R = r0 + r, C = c0 + c;
-        t[R][C] = 1;
-        for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const y = R + dr, x = C + dc;
-          if (y < 0 || x < 0 || y >= N || x >= N || g[y][x]) snug++;
-        }
-      }));
-      const rows = [], cols = [];
+      for (let i = 0; i < pts.length; i += 2) {
+        const R = r0 + pts[i], C = c0 + pts[i + 1];
+        addR[R]++; addC[C]++;
+        if (R === 0 || g[R - 1][C]) snug++;
+        if (R === N - 1 || g[R + 1][C]) snug++;
+        if (C === 0 || g[R][C - 1]) snug++;
+        if (C === N - 1 || g[R][C + 1]) snug++;
+      }
+      let L = 0;
       for (let i = 0; i < N; i++) {
-        if (t[i].every(Boolean)) rows.push(i);
-        if (t.every((row) => row[i])) cols.push(i);
+        if (addR[i]) { if (rowCnt[i] + addR[i] === N) L++; addR[i] = 0; }
+        if (addC[i]) { if (colCnt[i] + addC[i] === N) L++; addC[i] = 0; }
       }
-      const L = rows.length + cols.length;
       const score = L * L * 100 + snug; // letup 2 baris serentak > 2 kali letup 1 baris
-      if (!best || score > best.score) {
-        rows.forEach((i) => t[i].fill(0));
-        cols.forEach((i) => t.forEach((row) => { row[i] = 0; }));
-        best = { score, lines: rows.length + cols.length, grid: t };
-      }
+      if (score > bestScore) { bestScore = score; br = r0; bc = c0; bl = L; }
     }
-    return best;
+    if (bestScore < 0) return null;
+    // Bina papan hasil untuk kedudukan terbaik sahaja
+    const t = g.map((row) => row.slice());
+    for (let i = 0; i < pts.length; i += 2) t[br + pts[i]][bc + pts[i + 1]] = 1;
+    if (bl) {
+      const fr = [], fc = [];
+      for (let i = 0; i < N; i++) {
+        if (t[i].every(Boolean)) fr.push(i);
+        if (t.every((row) => row[i])) fc.push(i);
+      }
+      fr.forEach((i) => t[i].fill(0));
+      fc.forEach((i) => t.forEach((row) => { row[i] = 0; }));
+    }
+    return { score: bestScore, lines: bl, grid: t };
   }
 
   // Boleh ke ketiga-tiga blok diletak (cuba semua 6 susunan)? Berapa besar letupan dia?
@@ -561,7 +609,7 @@
     }
     if (t === 'kaca') {
       const C = P(rnd(35, 65), rnd(35, 65));
-      const ring = [P(0, 0), P(rnd(25, 75), 0), P(100, 0), P(100, rnd(25, 75)), P(100, 100), P(rnd(25, 75), 100), P(0, 100), P(0, rnd(25, 75))];
+      const ring = [P(0, 0), P(rnd(30, 70), 0), P(100, rnd(15, 45)), P(100, 100), P(rnd(30, 70), 100), P(0, rnd(55, 85))];
       const shards = ring.map((p, i) => [C, p, ring[(i + 1) % ring.length]]);
       const inner = ring.map((p) => P(C[0] + (p[0] - C[0]) * 0.35, C[1] + (p[1] - C[1]) * 0.35));
       return { cracks: ring.map((p) => [C, p]).concat([inner.concat([inner[0]])]), shards };
@@ -577,9 +625,189 @@
     };
   }
 
+  // ===== Enjin kepingan: SEMUA kepingan, habuk & daun dilukis atas satu canvas =====
+  // (dulu setiap kepingan satu elemen HTML — ratusan elemen, berat gila kat phone)
+  const fxCanvas = document.createElement('canvas');
+  fxCanvas.className = 'fxc';
+  fxLayer.appendChild(fxCanvas);
+  const fx = fxCanvas.getContext('2d');
+  let fxDPR = 1, fxW = 0, fxH = 0;
+  function sizeFx() {
+    fxDPR = 1; // kepingan bergerak laju — resolusi biasa cukup, 4x kurang piksel nak dilukis
+    fxW = innerWidth; fxH = innerHeight;
+    fxCanvas.width = Math.round(fxW * fxDPR); fxCanvas.height = Math.round(fxH * fxDPR);
+  }
+  sizeFx();
+  addEventListener('resize', sizeFx);
+  const parts = [];
+  let fxOn = false, fxLast = 0;
+  function spawn(p) {
+    if (p.draw === drawShard) cutShard(p);
+    parts.push(p);
+    if (!fxOn) { fxOn = true; fxLast = performance.now(); requestAnimationFrame(fxTick); }
+  }
+  function fxTick(now) {
+    const dt = Math.min(0.034, Math.max(0, (now - fxLast) / 1000));
+    fxLast = now;
+    fx.setTransform(fxDPR, 0, 0, fxDPR, 0, 0);
+    fx.clearRect(0, 0, fxW, fxH);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.t += dt;
+      if (p.t < 0) continue; // belum mula (kelewatan)
+      if (p.t >= p.life || p.y > fxH + 60) {
+        if (p.spr) recycle(p.spr);
+        parts.splice(i, 1);
+        if (p.onEnd) p.onEnd();
+        continue;
+      }
+      p.vy += p.g * dt;
+      if (p.drag) p.vx *= Math.max(0, 1 - p.drag * dt);
+      p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
+      fx.globalAlpha = p.t > p.life - p.fade ? (p.life - p.t) / p.fade : 1;
+      p.draw(p);
+    }
+    fx.globalAlpha = 1;
+    fxCanvas.dataset.n = parts.length;
+    if (parts.length) requestAnimationFrame(fxTick);
+    else { fxOn = false; fx.clearRect(0, 0, fxW, fxH); }
+  }
+  // Kepingan dipotong SEKALI masa pecah jadi gambar kecil; setiap frame cuma "cop" gambar tu (laju)
+  const pool = [];
+  const getCanvas = (w, h) => { const c = pool.pop() || document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  const recycle = (c) => { if (pool.length < 400) pool.push(c); };
+  function cutShard(p) {
+    const q = p.poly;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let i = 0; i < q.length; i += 2) { x0 = Math.min(x0, q[i]); x1 = Math.max(x1, q[i]); y0 = Math.min(y0, q[i + 1]); y1 = Math.max(y1, q[i + 1]); }
+    x0 = Math.floor(x0) - 1; y0 = Math.floor(y0) - 1;
+    const c = getCanvas(Math.ceil(x1) + 1 - x0, Math.ceil(y1) + 1 - y0);
+    const g = c.getContext('2d');
+    g.translate(-x0, -y0);
+    g.beginPath();
+    g.moveTo(q[0], q[1]);
+    for (let i = 2; i < q.length; i += 2) g.lineTo(q[i], q[i + 1]);
+    g.closePath();
+    g.save();
+    g.clip();
+    if (p.img) g.drawImage(p.img, p.sx, p.sy, p.sw, p.sh, -p.ox, -p.oy, p.w, p.h);
+    else { g.fillStyle = '#888'; g.fillRect(-p.ox, -p.oy, p.w, p.h); }
+    g.restore();
+    g.strokeStyle = p.edge;
+    g.lineWidth = 1;
+    g.stroke();
+    p.spr = c; p.sx0 = x0; p.sy0 = y0;
+    p.img = null; p.poly = null;
+  }
+  function drawShard(p) {
+    fx.setTransform(Math.cos(p.rot), Math.sin(p.rot), -Math.sin(p.rot), Math.cos(p.rot), p.x, p.y);
+    fx.drawImage(p.spr, p.sx0, p.sy0);
+    fx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  // Retak: garis "merebak" + kilat putih atas petak, lepas tu petak pecah (onEnd)
+  function drawCrack(p) {
+    const u = p.t / p.life;
+    const jx = rnd(-1.2, 1.2), jy = rnd(-1.2, 1.2); // gegar sikit
+    fx.setTransform(1, 0, 0, 1, p.x + jx, p.y + jy);
+    fx.globalAlpha = 0.45 * u;
+    fx.fillStyle = '#fff';
+    fx.fillRect(0, 0, p.w, p.h);
+    fx.globalAlpha = 1;
+    fx.strokeStyle = p.stroke;
+    fx.lineWidth = p.lw;
+    fx.lineCap = 'round';
+    fx.lineJoin = 'round';
+    p.paths.forEach((pts, i) => {
+      fx.setLineDash([p.lens[i] * Math.min(1, u * 1.3), 1e4]);
+      fx.beginPath();
+      fx.moveTo(pts[0], pts[1]);
+      for (let j = 2; j < pts.length; j += 2) fx.lineTo(pts[j], pts[j + 1]);
+      fx.stroke();
+    });
+    fx.setLineDash([]);
+    fx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  const CRACK_STYLE = {
+    batu: ['rgba(20,15,10,.85)', 0.05],
+    kaca: ['rgba(255,255,255,.95)', 0.03],
+    pokok: ['rgba(40,20,5,.85)', 0.04],
+  };
+
+  function drawSprite(p) {
+    const s = p.scaleAt ? p.scaleAt(p.t / p.life) : 1;
+    const sw = p.sway ? Math.sin(p.t * p.sway) : 0;
+    fx.save();
+    fx.translate(p.x + sw * (p.swayAmp || 0), p.y);
+    fx.rotate(p.rot + sw * 0.9);
+    if (p.alpha) fx.globalAlpha *= p.alpha;
+    fx.drawImage(p.img, -p.w * s / 2, -p.h * s / 2, p.w * s, p.h * s);
+    fx.restore();
+  }
+  function drawSpeck(p) { fx.fillStyle = p.fill; fx.fillRect(p.x, p.y, p.w, p.h); }
+  const sprite = (w, h, paint) => { const c = document.createElement('canvas'); c.width = w; c.height = h; paint(c.getContext('2d')); return c; };
+  const SPR = {
+    dust: sprite(64, 64, (g) => {
+      const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(235,225,210,.85)'); gr.addColorStop(0.4, 'rgba(190,180,165,.45)'); gr.addColorStop(1, 'rgba(190,180,165,0)');
+      g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    }),
+    spark: sprite(32, 32, (g) => {
+      const st = [[16, 1], [19, 13], [31, 16], [19, 19], [16, 31], [13, 19], [1, 16], [13, 13]];
+      g.shadowColor = '#bff4ff'; g.shadowBlur = 6; g.fillStyle = '#fff';
+      g.beginPath(); st.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.fill();
+    }),
+    leaf: sprite(24, 14, (g) => {
+      const gr = g.createLinearGradient(0, 0, 24, 14);
+      gr.addColorStop(0, '#9be05a'); gr.addColorStop(1, '#3e8a2a');
+      g.fillStyle = gr; g.beginPath(); g.ellipse(12, 7, 11, 5.5, 0, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(30,60,20,.5)'; g.beginPath(); g.moveTo(2, 7); g.lineTo(22, 7); g.stroke();
+    }),
+  };
+
+  // Satu petak pecah: kepingan ikut corak retak + habuk/kilauan ikut tema
+  function spawnBreak(t, rect, color, pat, lines, bp, dense) {
+    const img = BAKED[t] && BAKED[t][color];
+    const bpv = (bp || '30% 40%').split(' ').map(parseFloat);
+    const W = rect.width, Hh = rect.height;
+    let sx = 0, sy = 0, sw = 0, sh = 0;
+    if (img) { // bahagian gambar yang sama dengan yang petak tu tunjuk (background-size 220%)
+      sw = img.width / 2.2; sh = img.height / 2.2;
+      sx = img.width * 1.2 / 2.2 * bpv[0] / 100; sy = img.height * 1.2 / 2.2 * bpv[1] / 100;
+    }
+    const edge = t === 'kaca' ? 'rgba(255,255,255,.75)' : t === 'batu' ? 'rgba(0,0,0,.35)' : 'rgba(50,25,8,.45)';
+    const push = 1 + lines * 0.25;
+    pat.shards.forEach((poly) => {
+      const cxp = poly.reduce((a, p) => a + p[0], 0) / poly.length, cyp = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+      const ox = cxp / 100 * W, oy = cyp / 100 * Hh;
+      const q = [];
+      poly.forEach((p) => q.push(p[0] / 100 * W - ox, p[1] / 100 * Hh - oy));
+      const dx = (cxp - 50) / 50, dy = (cyp - 50) / 50;
+      const sh0 = { x: rect.left + ox, y: rect.top + oy, rot: 0, t: 0, poly: q, img, sx, sy, sw, sh, ox, oy, w: W, h: Hh, edge, draw: drawShard, drag: 0 };
+      if (t === 'kaca') Object.assign(sh0, { vx: dx * rnd(200, 380) * push, vy: dy * rnd(200, 380) * push - 60, g: 1500, drag: 2.2, vr: rnd(-12, 12), life: rnd(0.95, 1.2), fade: 0.3 });
+      else if (t === 'batu') Object.assign(sh0, { vx: dx * rnd(50, 110) * push, vy: dy * rnd(40, 90) * push - rnd(110, 170), g: 1250, vr: rnd(-4.5, 4.5), life: rnd(1.1, 1.4), fade: 0.3 });
+      else Object.assign(sh0, { vx: dx * rnd(40, 90) * push + rnd(-20, 20), vy: -rnd(70, 130) * push, g: 1200, vr: rnd(-3, 3), life: rnd(1.1, 1.3), fade: 0.25 });
+      spawn(sh0);
+    });
+    const cx = rect.left + W / 2, cy = rect.top + Hh / 2;
+    if (t === 'batu') {
+      spawn({ x: cx, y: cy, vx: rnd(-20, 20), vy: rnd(-40, -15), g: 0, vr: 0, rot: 0, t: 0, life: rnd(0.7, 0.95), fade: 0.6, img: SPR.dust, w: 46, h: 46, alpha: 0.9, scaleAt: (u) => 0.4 + u * 2, draw: drawSprite });
+      for (let i = 0; i < (dense ? 1 : 2); i++) {
+        const z = rnd(4, 7);
+        spawn({ x: cx, y: cy, vx: rnd(-220, 220), vy: rnd(-280, -120), g: 1500, vr: rnd(-10, 10), rot: 0, t: 0, life: 1, fade: 0.3,
+          poly: [-z / 2, -z / 2, z / 2, -z / 3, z / 2, z / 2, -z / 3, z / 2], img, sx: sx + rnd(0, sw * 0.6), sy: sy + rnd(0, sh * 0.6), sw: sw * 0.3, sh: sh * 0.3,
+          ox: z / 2, oy: z / 2, w: z, h: z, edge, draw: drawShard });
+      }
+    } else if (t === 'kaca') {
+      if (!dense || Math.random() < 0.5) spawn({ x: cx + rnd(-W / 2, W / 2), y: cy + rnd(-Hh / 2, Hh / 2), vx: 0, vy: 0, g: 0, vr: 6, rot: 0, t: 0, life: 0.45, fade: 0.1, img: SPR.spark, w: 18, h: 18,
+        scaleAt: (u) => (u < 0.4 ? (u / 0.4) * 1.3 : ((1 - u) / 0.6) * 1.3), draw: drawSprite });
+    } else {
+      for (let i = 0; i < (dense ? 1 : 3); i++) spawn({ x: cx + rnd(-8, 8), y: cy + rnd(-8, 8), vx: rnd(-160, 160), vy: rnd(-200, -60), g: 600, drag: 1.2, vr: 0, rot: 0, t: 0, life: rnd(0.9, 1.2), fade: 0.4, w: 4, h: 3, fill: '#d8b47a', draw: drawSpeck });
+      if (pat.leaves) spawn({ x: cx, y: cy, vx: 0, vy: rnd(90, 150), g: 0, vr: 0, rot: rnd(0, 3), t: 0, life: rnd(1.4, 1.8), fade: 0.4, img: SPR.leaf, w: 16, h: 9, sway: rnd(5, 7), swayAmp: rnd(18, 32), draw: drawSprite });
+    }
+  }
+
   function shatter(toClear, lines, origin, rows, cols) {
     const t = skin();
-    const tl = gsap.timeline({ delay: 0.05 }); // "hit-stop" sekejap sebelum retak — rasa hentakan
     // Pancaran cahaya sepanjang baris/lajur yang penuh, memancar dari tempat blok diletak
     const wrapEl = boardEl.parentElement;
     const beam = (isRow, i) => {
@@ -605,112 +833,29 @@
       keyframes: [{ x: -amp, y: amp * 0.5 }, { x: amp, y: -amp * 0.5 }, { x: -amp * 0.6, y: -amp * 0.3 }, { x: amp * 0.35, y: amp * 0.2 }, { x: 0, y: 0 }],
       duration: 0.32 + lines * 0.04, delay: 0.18, ease: 'none', clearProps: 'transform',
     });
+    // Baca SEMUA kedudukan petak sekali gus dulu (kalau baca sambil ubah DOM, browser kira semula susun atur berkali-kali)
+    const rects = new Map();
+    toClear.forEach((k) => rects.set(k, cells[Math.floor(k / N)][k % N].getBoundingClientRect()));
+    const dense = toClear.size > 16;
+    const [stroke, lwRatio] = CRACK_STYLE[t];
     toClear.forEach((k) => {
       const r = Math.floor(k / N), c = k % N, el = cells[r][c];
       const color = grid[r][c] || 1;
       const pat = breakPattern(t);
-      const delay = Math.min(0.2, Math.hypot(r - origin[0], c - origin[1]) * 0.035);
-      // 1) retak
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 100 100');
-      svg.setAttribute('class', 'crack');
-      const paths = pat.cracks.map((pts) => {
-        const pa = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        pa.setAttribute('d', 'M' + pts.map((p) => p.join(' ')).join(' L'));
-        pa.setAttribute('pathLength', '100');
-        svg.appendChild(pa);
-        return pa;
+      const rect = rects.get(k), W = rect.width, Hh = rect.height;
+      const delay = 0.05 + Math.min(0.2, Math.hypot(r - origin[0], c - origin[1]) * 0.035); // 0.05 = "hit-stop"
+      const paths = pat.cracks.map((pts) => pts.flatMap((p) => [p[0] / 100 * W, p[1] / 100 * Hh]));
+      const lens = paths.map((q) => { let L = 0; for (let j = 2; j < q.length; j += 2) L += Math.hypot(q[j] - q[j - 2], q[j + 1] - q[j - 1]); return L; });
+      const bp = el.style.getPropertyValue('--bp');
+      spawn({
+        x: rect.left, y: rect.top, w: W, h: Hh, t: -delay, life: 0.14, fade: 0, vx: 0, vy: 0, g: 0, vr: 0, rot: 0,
+        paths, lens, stroke, lw: Math.max(1.2, W * lwRatio), draw: drawCrack,
+        onEnd: () => {
+          if (grid[r][c]) el.classList.add('shattered'); // kalau papan dah dikosongkan, jangan sorok petak
+          spawnBreak(t, rect, color, pat, lines, bp, dense);
+        },
       });
-      el.appendChild(svg);
-      tl.fromTo(paths, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.12, ease: 'power1.out' }, delay);
-      tl.to(el, { x: rnd(-2, 2), y: rnd(-2, 2), duration: 0.04, repeat: 3, yoyo: true }, delay);
-      tl.to(el, { filter: 'brightness(1.7)', duration: 0.1 }, delay + 0.04);
-      // 2) pecah
-      tl.add(() => {
-        const rect = el.getBoundingClientRect();
-        if (grid[r][c]) el.classList.add('shattered'); // kalau papan dah dikosongkan, jangan sorok petak
-        debris(t, rect, color);
-        svg.remove();
-        gsap.set(el, { clearProps: 'transform,filter' });
-        pat.shards.forEach((poly) => {
-          const f = document.createElement('div');
-          f.className = 'frag c' + color;
-          const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cy = poly.reduce((a, p) => a + p[1], 0) / poly.length;
-          Object.assign(f.style, {
-            left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', height: rect.height + 'px',
-            clipPath: 'polygon(' + poly.map((p) => p[0] + '% ' + p[1] + '%').join(',') + ')',
-            transformOrigin: cx + '% ' + cy + '%',
-          });
-          f.style.setProperty('--bp', el.style.getPropertyValue('--bp'));
-          fxLayer.appendChild(f);
-          const dx = (cx - 50) / 50, dy = (cy - 50) / 50, push = 1 + lines * 0.25;
-          const done = () => f.remove();
-          if (t === 'kaca') {
-            gsap.timeline({ onComplete: done })
-              .to(f, { x: dx * rnd(25, 55) * push, y: dy * rnd(25, 55) * push, rotation: rnd(-200, 200), duration: 0.22, ease: 'power3.out' })
-              .to(f, { x: '+=' + rnd(-25, 25), y: '+=' + rnd(260, 400), rotation: '+=' + rnd(-200, 200), duration: rnd(0.7, 0.9), ease: 'power2.in' })
-              .to(f, { opacity: 0, duration: 0.3 }, '-=0.3');
-          } else if (t === 'batu') {
-            gsap.timeline({ onComplete: done })
-              .to(f, { x: dx * 12 * push, y: dy * 12 * push - 10, rotation: rnd(-15, 15), duration: 0.16, ease: 'power2.out' })
-              .to(f, { x: '+=' + (dx * 25 + rnd(-15, 15)), y: '+=' + rnd(300, 460), rotation: rnd(-130, 130), duration: rnd(1, 1.3), ease: 'power3.in' })
-              .to(f, { opacity: 0, duration: 0.3 }, '-=0.3');
-          } else {
-            gsap.timeline({ onComplete: done })
-              .to(f, { y: -6 * push, rotation: rnd(-10, 10), duration: 0.1, ease: 'power1.out' })
-              .to(f, { x: dx * 30 + rnd(-20, 20), y: rnd(260, 400), rotation: rnd(-80, 80), duration: rnd(0.8, 1), ease: 'power2.in' })
-              .to(f, { opacity: 0, duration: 0.25 }, '-=0.25');
-          }
-        });
-        if (pat.leaves) {
-          const lf = document.createElement('div');
-          lf.className = 'leaf';
-          Object.assign(lf.style, { left: rect.left + rect.width / 2 + 'px', top: rect.top + rect.height / 2 + 'px' });
-          fxLayer.appendChild(lf);
-          const side = Math.random() < 0.5 ? -1 : 1;
-          gsap.to(lf, { y: rnd(150, 260), duration: rnd(1.3, 1.8), ease: 'sine.in', onComplete: () => lf.remove() });
-          gsap.to(lf, { x: side * rnd(25, 45), rotation: side * 70, duration: 0.4, repeat: 3, yoyo: true, ease: 'sine.inOut' });
-          gsap.to(lf, { opacity: 0, duration: 0.4, delay: 1.1 });
-        }
-      }, delay + 0.14);
     });
-  }
-
-  // Habuk / kilauan / habuk kayu bila petak pecah
-  function debris(t, rect, color) {
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const add = (cls, x, y) => {
-      const d = document.createElement('div');
-      d.className = cls;
-      Object.assign(d.style, { left: x + 'px', top: y + 'px' });
-      fxLayer.appendChild(d);
-      return d;
-    };
-    if (t === 'batu') {
-      const puff = add('dust', cx, cy);
-      gsap.fromTo(puff, { scale: 0.4, opacity: 0.75 }, { scale: rnd(1.8, 2.6), opacity: 0, x: rnd(-12, 12), y: rnd(-20, -6), duration: rnd(0.6, 0.9), ease: 'power2.out', onComplete: () => puff.remove() });
-      for (let i = 0; i < 3; i++) {
-        const pb = add('pebble c' + color, cx, cy);
-        pb.style.setProperty('--bp', randBP());
-        gsap.timeline({ onComplete: () => pb.remove() })
-          .to(pb, { x: rnd(-40, 40), y: rnd(-35, -10), rotation: rnd(-180, 180), duration: 0.2, ease: 'power2.out' })
-          .to(pb, { y: '+=' + rnd(250, 380), rotation: '+=' + rnd(-200, 200), duration: rnd(0.6, 0.8), ease: 'power2.in' });
-      }
-    } else if (t === 'kaca') {
-      for (let i = 0; i < 2; i++) {
-        const sp = add('sparkle', cx + rnd(-rect.width / 2, rect.width / 2), cy + rnd(-rect.height / 2, rect.height / 2));
-        gsap.timeline({ onComplete: () => sp.remove(), delay: rnd(0, 0.15) })
-          .fromTo(sp, { scale: 0, rotation: 0 }, { scale: rnd(0.9, 1.5), rotation: 90, duration: 0.18, ease: 'back.out(3)' })
-          .to(sp, { scale: 0, rotation: 180, duration: 0.25, ease: 'power2.in' });
-      }
-    } else {
-      for (let i = 0; i < 4; i++) {
-        const sd = add('sawdust', cx + rnd(-8, 8), cy + rnd(-8, 8));
-        gsap.timeline({ onComplete: () => sd.remove() })
-          .to(sd, { x: rnd(-30, 30), y: rnd(-25, -5), duration: 0.18, ease: 'power2.out' })
-          .to(sd, { x: '+=' + rnd(-15, 15), y: '+=' + rnd(120, 220), opacity: 0, duration: rnd(0.7, 1.1), ease: 'power1.in' });
-      }
-    }
   }
 
   // ===== Tukar tema: petak flip gelombang dari tengah =====
