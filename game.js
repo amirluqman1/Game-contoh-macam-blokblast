@@ -154,7 +154,8 @@
         if (t[i].every(Boolean)) rows.push(i);
         if (t.every((row) => row[i])) cols.push(i);
       }
-      const score = (rows.length + cols.length) * 100 + snug;
+      const L = rows.length + cols.length;
+      const score = L * L * 100 + snug; // letup 2 baris serentak > 2 kali letup 1 baris
       if (!best || score > best.score) {
         rows.forEach((i) => t[i].fill(0));
         cols.forEach((i) => t.forEach((row) => { row[i] = 0; }));
@@ -164,19 +165,26 @@
     return best;
   }
 
-  // Boleh ke ketiga-tiga blok diletak (cuba semua 6 susunan)? Berapa baris boleh letup?
+  // Boleh ke ketiga-tiga blok diletak (cuba semua 6 susunan)? Berapa besar letupan dia?
   function simRateSet(g, shapes) {
     const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
-    let best = { placed: 0, lines: 0 };
+    let best = null;
     for (const o of orders) {
-      let cur = g, placed = 0, lines = 0;
+      let cur = g, placed = 0, lines = 0, boom = 0;
       for (const k of o) {
         const b = simBestPlace(cur, shapes[k]);
         if (!b) break;
-        cur = b.grid; placed++; lines += b.lines;
+        cur = b.grid; placed++; lines += b.lines; boom += b.lines * b.lines;
       }
-      if (placed > best.placed || (placed === best.placed && lines > best.lines)) best = { placed, lines };
-      if (placed === 3 && lines >= 3) break;
+      // Baris/lajur yang dah 6-7 penuh = umpan untuk letupan besar pusingan depan
+      let setup = 0;
+      for (let i = 0; i < N; i++) {
+        const rn = cur[i].filter(Boolean).length, cn = cur.filter((row) => row[i]).length;
+        if (rn >= 6) setup++;
+        if (cn >= 6) setup++;
+      }
+      const r = { placed, lines, boom, setup };
+      if (!best || placed > best.placed || (placed === best.placed && boom * 10 + setup > best.boom * 10 + best.setup)) best = r;
     }
     return best;
   }
@@ -184,19 +192,34 @@
 
   function newTray() {
     const help = helpLevel();
+    // Cari bentuk yang boleh letupkan baris SEKARANG (penutup lubang). Makin banyak baris, makin diutamakan.
+    const clearers = [];
+    SHAPES.forEach((sh) => {
+      const b = simBestPlace(grid, sh);
+      if (b && b.lines > 0) clearers.push({ sh, w: b.lines * b.lines * b.lines });
+    });
+    // Kalau ada bentuk yang boleh letup 2+ baris serentak, bagi yang tu je
+    const maxW = Math.max(0, ...clearers.map((c) => c.w));
+    const pool = maxW >= 8 ? clearers.filter((c) => c.w >= 8) : clearers;
+    const pickClearer = () => {
+      let x = Math.random() * pool.reduce((a, c) => a + c.w, 0);
+      for (const c of pool) if ((x -= c.w) <= 0) return c.sh;
+      return pool[pool.length - 1].sh;
+    };
+    // 6 set calon bila papan lapang, sampai 12 bila sesak
+    const want = 6 + Math.round(help * 6);
     const candidates = [];
-    // Papan lapang: 1 set random (asal ada yang muat). Papan sesak: sampai 8 set calon, pilih yang paling membantu.
-    const want = 1 + Math.round(help * 7);
-    for (let t = 0; t < 40 && candidates.length < want; t++) {
+    for (let t = 0; t < 60 && candidates.length < want; t++) {
       const set = [randomPiece(help), randomPiece(help), randomPiece(help)];
+      if (pool.length && t % 3 !== 2) set[Math.floor(Math.random() * 3)].shape = pickClearer();
       if (set.some((p) => canFitAnywhere(p.shape))) candidates.push(set);
     }
     if (!candidates.length) candidates.push([randomPiece(help), randomPiece(help), randomPiece(help)]);
-    if (candidates.length === 1) { tray = candidates[0]; return; }
     let best = null, bestScore = -1;
     for (const set of candidates) {
       const r = simRateSet(grid, set.map((p) => p.shape));
-      const score = r.placed * 1000 + r.lines * 50 + Math.random() * 10;
+      // Utama: semua muat. Lepas tu: letupan besar, dan susun baris untuk letupan depan. Sikit random.
+      const score = r.placed * 1000 + r.boom * 100 + r.setup * 30 + Math.random() * 25;
       if (score > bestScore) { bestScore = score; best = set; }
     }
     tray = best;
@@ -370,7 +393,35 @@
     if (score > best) { best = score; bestEl.textContent = best; store.set('blokboom-best', best); }
   }
 
-  function showPopup(text) {
+  // Serpihan + gegar papan
+  const wrapEl = boardEl.parentElement;
+  function boom(toClear, lines) {
+    if (reduceMotion) return;
+    const per = lines >= 3 ? 3 : 2;
+    toClear.forEach((k) => {
+      const el = cells[Math.floor(k / N)][k % N];
+      const color = grid[Math.floor(k / N)][k % N] || 1 + Math.floor(Math.random() * COLORS);
+      for (let i = 0; i < per; i++) {
+        const sp = document.createElement('span');
+        sp.className = 'spark blk c' + color;
+        const ang = Math.random() * Math.PI * 2, dist = 30 + Math.random() * (40 + lines * 25);
+        sp.style.left = el.offsetLeft + el.offsetWidth / 2 + 'px';
+        sp.style.top = el.offsetTop + el.offsetHeight / 2 + 'px';
+        sp.style.setProperty('--dx', Math.cos(ang) * dist + 'px');
+        sp.style.setProperty('--dy', Math.sin(ang) * dist + 'px');
+        sp.style.setProperty('--rot', (Math.random() * 540 - 270) + 'deg');
+        wrapEl.appendChild(sp);
+        setTimeout(() => sp.remove(), 700);
+      }
+    });
+    if (lines >= 2) {
+      boardEl.classList.remove('shake', 'shake-big'); void boardEl.offsetWidth;
+      boardEl.classList.add(lines >= 3 ? 'shake-big' : 'shake');
+    }
+  }
+
+  function showPopup(text, size = 1) {
+    popupEl.style.setProperty('--size', size);
     popupEl.textContent = text;
     popupEl.classList.remove('show'); void popupEl.offsetWidth; popupEl.classList.add('show');
   }
@@ -384,6 +435,7 @@
     }));
     tray[i] = null;
     render();
+    renderTray(); // terus buang blok dari tray, jangan tunggu letupan habis
     p.shape.forEach((row, r) => row.forEach((v, c) => { if (v) cells[r0 + r][c0 + c].classList.add('placed'); }));
     sndPlace();
     addScore(n);
@@ -397,9 +449,10 @@
       rows.forEach((r) => { for (let c = 0; c < N; c++) toClear.add(r * N + c); });
       cols.forEach((c) => { for (let r = 0; r < N; r++) toClear.add(r * N + c); });
       toClear.forEach((k) => cells[Math.floor(k / N)][k % N].classList.add('clearing'));
+      boom(toClear, lines);
       sndClear(lines);
       const words = ['', 'Bagus!', 'Mantap!', 'Power!', 'Gila ah!', 'LEGEND!'];
-      showPopup((combo > 1 ? `Combo x${combo}  ` : '') + (words[Math.min(lines, 5)]) + ` +${pts}`);
+      showPopup((combo > 1 ? `Combo x${combo}  ` : '') + (words[Math.min(lines, 5)]) + ` +${pts}`, Math.min(1.3, 0.9 + lines * 0.1 + combo * 0.05));
       busy = true;
       setTimeout(() => {
         toClear.forEach((k) => { grid[Math.floor(k / N)][k % N] = 0; });

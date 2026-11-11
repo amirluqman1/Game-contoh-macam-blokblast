@@ -69,8 +69,8 @@ body{
 .hint{text-align:center;color:var(--muted);font-size:13px;margin:0}
 
 .popup{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);pointer-events:none;
-  font-weight:900;font-size:34px;color:var(--accent);text-shadow:0 3px 0 #a1470d,0 6px 16px #000a;
-  opacity:0;white-space:nowrap}
+  font-weight:900;font-size:calc(min(32px, 7.5vw) * var(--size,1));color:var(--accent);text-shadow:0 3px 0 #a1470d,0 6px 16px #000a;
+  opacity:0;width:max-content;max-width:100%;text-align:center;line-height:1.1}
 .popup.show{animation:popup 1s ease-out}
 @keyframes popup{0%{opacity:0;transform:translate(-50%,-30%) scale(.6)}20%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}
   80%{opacity:1}100%{opacity:0;transform:translate(-50%,-90%) scale(1)}}
@@ -88,3 +88,12 @@ button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .secondary{margin-top:14px;border:0;border-radius:14px;padding:12px 20px;font-size:16px;font-weight:700;background:var(--line);color:#fff;cursor:pointer}
 .primary{margin-top:14px;border:0;border-radius:14px;padding:12px 28px;font-size:18px;font-weight:800;
   background:linear-gradient(145deg,#ffcf3d,#ff8a00);color:#3b1d00;cursor:pointer}
+
+.spark{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:2px;pointer-events:none;z-index:5;
+  animation:spark .65s cubic-bezier(.15,.7,.3,1) forwards}
+@keyframes spark{0%{transform:scale(1.1)}to{transform:translate(var(--dx),var(--dy)) rotate(var(--rot)) scale(.35);opacity:0}}
+.board.shake{animation:shake .32s}
+.board.shake-big{animation:shake-big .45s}
+@keyframes shake{20%{transform:translate(-4px,2px)}40%{transform:translate(4px,-2px)}60%{transform:translate(-3px,-1px)}80%{transform:translate(2px,1px)}}
+@keyframes shake-big{15%{transform:translate(-8px,4px) rotate(-.6deg)}30%{transform:translate(8px,-4px) rotate(.6deg)}45%{transform:translate(-6px,-3px)}60%{transform:translate(5px,3px)}80%{transform:translate(-2px,1px)}}
+@media (prefers-reduced-motion: reduce){.board.shake,.board.shake-big{animation:none}}
