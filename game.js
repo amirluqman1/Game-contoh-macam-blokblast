@@ -85,65 +85,62 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
   }; // tutup objek store
 
-  // ---------- bunyi ringkas ----------
-  // actx = "audio context", enjin bunyi browser. Belum dicipta (undefined), dicipta bila bunyi pertama diminta.
+  // ---------- bunyi ----------
+  // enjin bunyi browser (dicipta bila bunyi pertama diminta)
   let actx;
-  // beep(frekuensi, tempoh, jenis gelombang, kuat bunyi).
-  // "dur = 0.08" = nilai lalai: kalau tak bagi nilai, guna 0.08. Sama untuk type dan vol.
+  // beep(nada, tempoh, jenis, kuat). "dur = 0.08" = nilai lalai kalau tak diberi
   function beep(freq, dur = 0.08, type = 'sine', vol = 0.15) {
-    // Kalau bunyi dimatikan, keluar dari fungsi terus (return = berhenti dan pulang).
+    // bunyi dimatikan? keluar
     if (!soundOn) return;
-    // Cuba main bunyi; kalau browser tak sokong, catch di bawah tangkap error.
+    // cuba main; kalau browser tak sokong, catch tangkap
     try {
-      // "a = a || b" bermaksud: kalau a dah ada guna a, kalau belum, cipta yang baru.
-      // webkitAudioContext = nama lama untuk Safari lama.
+      // guna yang sedia ada, kalau belum ada cipta baru ("a || b")
       actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      // Cipta "oscillator" (penjana bunyi) dan "gain" (kawalan kuat bunyi).
+      // o = penjana bunyi, g = kawalan kuat bunyi
       const o = actx.createOscillator(), g = actx.createGain();
-      // Tetapkan jenis gelombang (sine/square/triangle...) dan frekuensi (nada tinggi rendah).
+      // set jenis gelombang dan nada
       o.type = type; o.frequency.value = freq;
-      // Mula bunyi pada kuat "vol" sekarang.
+      // mula pada kuat "vol"
       g.gain.setValueAtTime(vol, actx.currentTime);
-      // Bunyi mengecil secara perlahan sampai hampir senyap dalam tempoh "dur" (supaya tak bunyi "klik").
+      // mengecil perlahan sampai senyap (elak bunyi "klik")
       g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
-      // Sambung wayar: penjana -> kawalan kuat bunyi -> speaker (destination).
+      // sambung: penjana -> kuat bunyi -> speaker
       o.connect(g).connect(actx.destination);
-      // Mula main sekarang, dan berhenti selepas "dur" saat.
+      // main sekarang, berhenti lepas "dur" saat
       o.start(); o.stop(actx.currentTime + dur);
-    } catch {} // kalau gagal, abaikan
-  } // tutup fungsi beep
-  // Bunyi letak blok: bunyi pendek nada 320 Hz.
+    } catch {} // gagal? abaikan
+  } // tutup beep
+  // bunyi letak blok: pendek, 320 Hz
   const sndPlace = () => beep(320, 0.06, 'triangle');
-    // Bunyi pecah: lain ikut tema. (lines = berapa baris meletup serentak)
+    // bunyi pecah, lain ikut tema (lines = bilangan baris meletup)
     const sndBreak = (lines) => {
-    // Ambil nama tema sekarang ('batu' / 'kaca' / 'pokok')
+    // nama tema sekarang
     const t = skin();
-    // Kalau tema batu:
+    // batu:
     if (t === 'batu') {
-      // satu dentum rendah (90 Hz, gelombang segi empat)
+      // dentum rendah
       beep(90, 0.2, 'square', 0.12);
-      // "for" = ulang. Ulang (3 + lines) kali: setiap kali, jadualkan satu bunyi kecil rawak.
-      // setTimeout(fungsi, ms) = jalankan fungsi tu selepas ms milisaat. Math.random() = nombor rawak 0 hingga <1.
+      // (3 + lines) bunyi kecil rawak; setTimeout = jalankan selepas ms milisaat
       for (let i = 0; i < 3 + lines; i++) setTimeout(() => beep(180 + Math.random() * 260, 0.03, 'square', 0.05), 40 + i * 35);
-    // kalau tema kaca:
+    // kaca:
     } else if (t === 'kaca') {
-      // banyak "ting" kecil nada tinggi rawak, macam kaca berderai
+      // banyak "ting" tinggi rawak
       for (let i = 0; i < 4 + lines * 2; i++) setTimeout(() => beep(1700 + Math.random() * 1900, 0.09, 'sine', 0.06), i * 28);
-    // selain tu (tema pokok):
+    // pokok:
     } else {
-      // ketukan kayu: bunyi kuat dulu, lepas 70ms bunyi lebih rendah
+      // ketukan kayu, kuat dulu
       beep(260, 0.08, 'triangle', 0.2);
-      setTimeout(() => beep(170, 0.12, 'triangle', 0.14), 70);  // bunyi kedua, lebih rendah, selepas 70ms
-      // sebiji bunyi naik nada untuk setiap baris yang meletup
+      // lepas 70ms, lebih rendah
+      setTimeout(() => beep(170, 0.12, 'triangle', 0.14), 70);
+      // satu nada naik setiap baris
       for (let i = 0; i < lines; i++) setTimeout(() => beep(420 + i * 90, 0.05, 'triangle', 0.08), 150 + i * 60);
     } // tutup if/else tema
-    // Kalau letup 2 baris atau lebih, tambah 3 bunyi naik (sebagai ganjaran).
-    // [0,1,2].forEach(fungsi) = jalankan fungsi sekali untuk setiap item dalam senarai.
+    // 2+ baris: tambah 3 bunyi naik (ganjaran). forEach = buat sekali setiap item
     if (lines >= 2) [0, 1, 2].forEach((i) => setTimeout(() => beep(620 + i * 180 + lines * 60, 0.12, 'square', 0.06), 200 + i * 70));
   }; // tutup sndBreak
-  // Bunyi tukar tema: 5 nada naik. 1.26 dikuasakan i (Math.pow) = setiap nada ~4 semitone lebih tinggi dari sebelumnya.
+  // bunyi tukar tema: 5 nada naik (setiap nada x1.26 dari sebelum)
   const sndSkin = () => [0, 1, 2, 3, 4].forEach((i) => setTimeout(() => beep(400 * Math.pow(1.26, i), 0.14, 'triangle', 0.1), i * 70));
-  // Bunyi game over: 3 nada TURUN (300 tolak i*70) gelombang gergaji.
+  // bunyi game over: 3 nada turun
   const sndOver = () => [0, 1, 2].forEach((i) => setTimeout(() => beep(300 - i * 70, 0.2, 'sawtooth', 0.08), i * 150));
 
   // ---------- tema ----------
