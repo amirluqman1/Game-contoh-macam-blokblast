@@ -105,15 +105,30 @@
   }
 
   // ---------- tray ----------
-  function randomPiece() {
-    return { shape: SHAPES[Math.floor(Math.random() * SHAPES.length)], color: 1 + Math.floor(Math.random() * COLORS) };
+  // Bantuan bila papan sesak: papan bawah 40% penuh = random biasa.
+  // Lepas tu makin penuh, makin tinggi peluang dapat blok kecil.
+  // Tak pernah sengaja bagi blok susah.
+  const cellCount = (shape) => shape.flat().filter(Boolean).length;
+
+  function helpLevel() {
+    const filled = grid.flat().filter(Boolean).length / (N * N);
+    return Math.min(1, Math.max(0, (filled - 0.4) / 0.35)); // 0 bila <=40% penuh, 1 bila >=75%
+  }
+
+  function randomPiece(help) {
+    const weights = SHAPES.map((sh) => 1 / Math.pow(cellCount(sh), 1.5 * help));
+    let x = Math.random() * weights.reduce((a, b) => a + b, 0);
+    let k = 0;
+    while (k < SHAPES.length - 1 && (x -= weights[k]) > 0) k++;
+    return { shape: SHAPES[k], color: 1 + Math.floor(Math.random() * COLORS) };
   }
 
   function newTray() {
     // Cuba bagi set yang sekurang-kurangnya satu blok boleh muat
+    const help = helpLevel();
     let set;
     for (let t = 0; t < 20; t++) {
-      set = [randomPiece(), randomPiece(), randomPiece()];
+      set = [randomPiece(help), randomPiece(help), randomPiece(help)];
       if (set.some((p) => canFitAnywhere(p.shape))) break;
     }
     tray = set;
