@@ -568,12 +568,11 @@
   const bannerEl = $('banner');
   function changeSkin() {
     const next = (skinIdx + 1) % SKINS.length;
-    const S = SKINS[next];
-    bannerEl.innerHTML = '<small>3 letupan berturut-turut!</small><span>' + S.icon + ' Tema ' + S.name + '</span>';
+    bannerEl.textContent = 'GEMPOUKK!';
     if (!window.gsap || reduceMotion) {
       busy = false;
       setSkin(next);
-      showPopup(S.icon + ' Tema ' + S.name + '!');
+      showPopup('GEMPOUKK!', 1.4);
       return;
     }
     busy = true;
@@ -590,9 +589,10 @@
       .to(flat, { rotateY: 0, scale: 1, duration: 0.4, ease: 'back.out(2.2)', stagger: stag })
       .to('.slot .piece', { scale: 1, duration: 0.35, ease: 'back.out(3)' }, '<')
       .add(() => { busy = false; gsap.set(flat, { clearProps: 'transform' }); gsap.set('.slot .piece', { clearProps: 'transform' }); })
-      .fromTo(bannerEl, { autoAlpha: 0, scale: 0.3, rotation: -8 }, { autoAlpha: 1, scale: 1, rotation: 0, duration: 0.45, ease: 'back.out(3)' }, 0.1)
-      .to(bannerEl, { autoAlpha: 0, y: -40, duration: 0.3, ease: 'power1.in' }, 1.5)
-      .set(bannerEl, { y: 0 });
+      .fromTo(bannerEl, { autoAlpha: 0, scale: 2.6, rotation: -14 }, { autoAlpha: 1, scale: 1, rotation: -4, duration: 0.35, ease: 'back.out(2.5)' }, 0)
+      .to(bannerEl, { scale: 1.08, rotation: 3, duration: 0.12, repeat: 3, yoyo: true, ease: 'sine.inOut' })
+      .to(bannerEl, { autoAlpha: 0, scale: 0.6, y: -30, duration: 0.3, ease: 'power2.in' }, 1.3)
+      .set(bannerEl, { y: 0, rotation: 0 });
   }
   const flashEl = document.createElement('div');
   flashEl.className = 'flash';

@@ -20,7 +20,7 @@ Ada 3 tema, setiap satu dengan 4 warna sendiri dan cara pecah sendiri:
 | 💎 Kaca | kaca berwarna lut sinar | retak bintang, serpihan terpelanting lalu jatuh |
 | 🌳 Pokok | kayu dan daun | terbelah jadi 3 papan kayu, daun melayang |
 
-Dapat **3 letupan berturut-turut** (combo x3, x6, x9...) → petak flip macam gelombang dan tema bertukar.
+Dapat **3 letupan berturut-turut** (combo x3, x6, x9...) → keluar **GEMPOUKK!**, petak flip macam gelombang dan tema bertukar.
 
 Animasi letupan guna [GSAP](https://gsap.com) dari cdnjs. Kalau GSAP tak dapat load (contoh: offline), game masih jalan dengan letupan ringkas.
 
