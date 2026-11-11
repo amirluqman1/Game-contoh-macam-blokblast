@@ -165,6 +165,57 @@
   // Bakar warna + tekstur jadi SATU gambar setiap warna. Blok guna gambar ni terus (ringan),
   // dan kepingan pecah dilukis dari gambar yang sama.
   const BAKED = {};
+  const BEVEL = {};
+  // Tepi serong (bevel) macam jubin timbul: atas paling terang, bawah paling gelap, bucu bertemu serong 45°
+  const BEVEL_STYLE = {
+    //       lebar  atas  kiri  kanan bawah  garis luar               garis dalam
+    batu:  [17, 0.34, 0.2, 0.3, 0.5, 'rgba(0,0,0,.45)', 0.22],
+    kaca:  [13, 0.6, 0.38, 0.14, 0.26, 'rgba(255,255,255,.7)', 0.35],
+    pokok: [15, 0.26, 0.16, 0.32, 0.5, 'rgba(45,22,6,.55)', 0.18],
+  };
+  function makeBevel(kind) {
+    const [b, aT, aL, aR, aB, outline, inner] = BEVEL_STYLE[kind];
+    const S = 128, cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const g = cv.getContext('2d');
+    const face = (pts, x0, y0, x1, y1, rgb, a) => {
+      const gr = g.createLinearGradient(x0, y0, x1, y1);
+      gr.addColorStop(0, `rgba(${rgb},${a})`);
+      gr.addColorStop(1, `rgba(${rgb},${a * 0.55})`);
+      g.fillStyle = gr;
+      g.beginPath();
+      pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.closePath();
+      g.fill();
+    };
+    face([[0, 0], [S, 0], [S - b, b], [b, b]], 0, 0, 0, b, '255,255,255', aT);             // atas
+    face([[0, 0], [b, b], [b, S - b], [0, S]], 0, 0, b, 0, '255,255,255', aL);             // kiri
+    face([[S, 0], [S, S], [S - b, S - b], [S - b, b]], S, 0, S - b, 0, '0,0,0', aR);         // kanan
+    face([[0, S], [b, S - b], [S - b, S - b], [S, S]], 0, S, 0, S - b, '0,0,0', aB);         // bawah
+    // garisan halus antara tepi serong & muka blok
+    g.lineWidth = 2;
+    g.strokeStyle = `rgba(255,255,255,${inner})`;
+    g.beginPath(); g.moveTo(b, S - b); g.lineTo(b, b); g.lineTo(S - b, b); g.stroke();
+    g.strokeStyle = `rgba(0,0,0,${inner})`;
+    g.beginPath(); g.moveTo(S - b, b); g.lineTo(S - b, S - b); g.lineTo(b, S - b); g.stroke();
+    // garis bucu serong (nampak lebih 3D)
+    g.lineWidth = 1.5;
+    g.strokeStyle = `rgba(255,255,255,${inner * 0.8})`;
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(b, b); g.stroke();
+    g.strokeStyle = `rgba(0,0,0,${inner * 0.8})`;
+    g.beginPath(); g.moveTo(S, S); g.lineTo(S - b, S - b); g.stroke();
+    // kilat lembut kat muka blok
+    const hl = g.createRadialGradient(S * 0.35, S * 0.3, 0, S * 0.35, S * 0.3, S * 0.55);
+    hl.addColorStop(0, 'rgba(255,255,255,.12)');
+    hl.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = hl;
+    g.fillRect(b, b, S - 2 * b, S - 2 * b);
+    // garis luar
+    g.lineWidth = 3;
+    g.strokeStyle = outline;
+    g.strokeRect(1.5, 1.5, S - 3, S - 3);
+    return cv;
+  }
   (function installTextures() {
     try {
       const prev = document.body.dataset.skin;
@@ -179,6 +230,8 @@
       SKINS.forEach((k) => {
         document.body.dataset.skin = k.id;
         const tex = makeTexture(k.id);
+        BEVEL[k.id] = makeBevel(k.id);
+        css += `body[data-skin="${k.id}"]{--bevel-img:url(${BEVEL[k.id].toDataURL('image/png')})}\n`;
         BAKED[k.id] = {};
         probes.forEach((d, i) => {
           const cs = getComputedStyle(d);
@@ -692,6 +745,7 @@
     g.clip();
     if (p.img) g.drawImage(p.img, p.sx, p.sy, p.sw, p.sh, -p.ox, -p.oy, p.w, p.h);
     else { g.fillStyle = '#888'; g.fillRect(-p.ox, -p.oy, p.w, p.h); }
+    if (p.bevel) g.drawImage(p.bevel, -p.ox, -p.oy, p.w, p.h);
     g.restore();
     g.strokeStyle = p.edge;
     g.lineWidth = 1;
@@ -782,7 +836,7 @@
       const q = [];
       poly.forEach((p) => q.push(p[0] / 100 * W - ox, p[1] / 100 * Hh - oy));
       const dx = (cxp - 50) / 50, dy = (cyp - 50) / 50;
-      const sh0 = { x: rect.left + ox, y: rect.top + oy, rot: 0, t: 0, poly: q, img, sx, sy, sw, sh, ox, oy, w: W, h: Hh, edge, draw: drawShard, drag: 0 };
+      const sh0 = { x: rect.left + ox, y: rect.top + oy, rot: 0, t: 0, poly: q, img, bevel: BEVEL[t], sx, sy, sw, sh, ox, oy, w: W, h: Hh, edge, draw: drawShard, drag: 0 };
       if (t === 'kaca') Object.assign(sh0, { vx: dx * rnd(200, 380) * push, vy: dy * rnd(200, 380) * push - 60, g: 1500, drag: 2.2, vr: rnd(-12, 12), life: rnd(0.95, 1.2), fade: 0.3 });
       else if (t === 'batu') Object.assign(sh0, { vx: dx * rnd(50, 110) * push, vy: dy * rnd(40, 90) * push - rnd(110, 170), g: 1250, vr: rnd(-4.5, 4.5), life: rnd(1.1, 1.4), fade: 0.3 });
       else Object.assign(sh0, { vx: dx * rnd(40, 90) * push + rnd(-20, 20), vy: -rnd(70, 130) * push, g: 1200, vr: rnd(-3, 3), life: rnd(1.1, 1.3), fade: 0.25 });
