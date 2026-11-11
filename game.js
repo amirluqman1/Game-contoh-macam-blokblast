@@ -31,6 +31,9 @@
   const popupEl = $('popup'), overEl = $('over');
 
   let grid, tray, score, best, combo, cells = [], soundOn = true, busy = false;
+  // Combo tak putus terus: ada 2 langkah "peluang" untuk letup lagi sebelum combo hilang
+  const COMBO_GRACE = 2;
+  let miss = 0;
 
   // ---------- simpanan (selamat kalau localStorage tak boleh guna) ----------
   const store = {
@@ -86,6 +89,88 @@
   // Save lama ada 7 warna, tema sekarang 4
   const fixColor = (v) => (v > COLORS ? ((v - 1) % COLORS) + 1 : v);
 
+  // ---------- tekstur (dilukis sekali guna canvas) ----------
+  const randBP = () => Math.round(Math.random() * 100) + '% ' + Math.round(Math.random() * 100) + '%';
+  function makeTexture(kind) {
+    const S = 128, cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const g = cv.getContext('2d');
+    const R = (a, b) => a + Math.random() * (b - a);
+    const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+    const noise = (amt, spike) => {
+      const im = g.getImageData(0, 0, S, S), d = im.data;
+      for (let i = 0; i < d.length; i += 4) {
+        let n = (Math.random() - 0.5) * amt;
+        if (spike && Math.random() < spike) n += Math.random() < 0.5 ? -90 : 90;
+        d[i] = clamp(d[i] + n); d[i + 1] = clamp(d[i + 1] + n); d[i + 2] = clamp(d[i + 2] + n);
+      }
+      g.putImageData(im, 0, 0);
+    };
+    if (kind === 'batu') {
+      g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 45; i++) { // tompok gelap/cerah
+        const x = R(0, S), y = R(0, S), r = R(8, 32), v = Math.random() < 0.5 ? 70 : 190;
+        const gr = g.createRadialGradient(x, y, 0, x, y, r);
+        gr.addColorStop(0, `rgba(${v},${v},${v},.38)`); gr.addColorStop(1, `rgba(${v},${v},${v},0)`);
+        g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2);
+      }
+      for (let i = 0; i < 4; i++) { // urat batu
+        let x = R(0, S), y = R(0, S);
+        g.beginPath(); g.moveTo(x, y);
+        for (let k = 0; k < 9; k++) { x += R(-16, 16); y += R(-16, 16); g.lineTo(x, y); }
+        g.strokeStyle = i % 2 ? 'rgba(230,230,230,.4)' : 'rgba(40,40,40,.35)'; g.lineWidth = R(0.6, 1.6); g.stroke();
+      }
+      for (let i = 0; i < 22; i++) { // lubang kecil
+        const x = R(0, S), y = R(0, S), r = R(0.8, 2.6);
+        g.fillStyle = 'rgba(25,25,25,.75)'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+        g.fillStyle = 'rgba(235,235,235,.45)'; g.beginPath(); g.arc(x + r * 0.5, y + r * 0.5, r * 0.45, 0, 7); g.fill();
+      }
+      noise(60, 0.05); // bintik granit
+    } else if (kind === 'pokok') {
+      g.fillStyle = 'rgb(128,128,128)'; g.fillRect(0, 0, S, S);
+      const kx = R(30, 100), ky = R(30, 100);
+      for (let y0 = -12; y0 < S + 12; y0 += R(2.2, 4.5)) { // urat kayu
+        g.beginPath();
+        const ph = R(0, 6), dark = Math.random() < 0.65;
+        for (let x = 0; x <= S; x += 3) {
+          const dx = x - kx, dy = y0 - ky, dist2 = dx * dx + dy * dy;
+          const bend = 14 * Math.exp(-dist2 / 260) * Math.sign(dy || 1);
+          const y = y0 + Math.sin(x * 0.045 + ph) * 2.2 + bend;
+          x ? g.lineTo(x, y) : g.moveTo(x, y);
+        }
+        g.strokeStyle = dark ? `rgba(50,50,50,${R(0.25, 0.55)})` : `rgba(210,210,210,${R(0.15, 0.35)})`;
+        g.lineWidth = R(0.5, 1.8); g.stroke();
+      }
+      for (let k = 6; k > 0; k--) { // mata kayu
+        g.beginPath(); g.ellipse(kx, ky, k * 2.4, k * 1.3, 0, 0, 7);
+        g.strokeStyle = `rgba(35,35,35,${0.15 + k * 0.05})`; g.lineWidth = 1.2; g.stroke();
+      }
+      g.fillStyle = 'rgba(30,30,30,.6)'; g.beginPath(); g.ellipse(kx, ky, 2.5, 1.5, 0, 0, 7); g.fill();
+      noise(26, 0);
+    } else { // kaca: lut sinar, gelembung halus & sedikit kabus
+      g.clearRect(0, 0, S, S);
+      for (let i = 0; i < 16; i++) {
+        const x = R(0, S), y = R(0, S), r = R(0.8, 3.5);
+        g.beginPath(); g.arc(x, y, r, 0, 7);
+        g.fillStyle = 'rgba(255,255,255,.10)'; g.fill();
+        g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 0.7; g.stroke();
+        g.fillStyle = 'rgba(255,255,255,.9)'; g.fillRect(x - r * 0.4, y - r * 0.5, 1, 1);
+      }
+      const im = g.getImageData(0, 0, S, S), d = im.data;
+      for (let i = 0; i < d.length; i += 4) if (Math.random() < 0.05) { d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.max(d[i + 3], 28); }
+      g.putImageData(im, 0, 0);
+    }
+    return cv.toDataURL();
+  }
+  (function installTextures() {
+    try {
+      const css = SKINS.map((k) => `body[data-skin="${k.id}"]{--tex-img:url(${makeTexture(k.id)})}`).join('\n');
+      const st = document.createElement('style');
+      st.textContent = css;
+      document.head.appendChild(st);
+    } catch (e) { /* canvas tak boleh guna: kekal tanpa tekstur */ }
+  })();
+
   // ---------- papan ----------
   function buildBoard() {
     boardEl.innerHTML = '';
@@ -95,6 +180,7 @@
       for (let c = 0; c < N; c++) {
         const d = document.createElement('div');
         d.className = 'cell';
+        d.style.setProperty('--bp', randBP()); // setiap petak tunjuk bahagian tekstur lain
         boardEl.appendChild(d);
         cells[r].push(d);
       }
@@ -202,11 +288,12 @@
     const orders = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
     let best = null;
     for (const o of orders) {
-      let cur = g, placed = 0, lines = 0, boom = 0;
+      let cur = g, placed = 0, lines = 0, boom = 0, clears = 0;
       for (const k of o) {
         const b = simBestPlace(cur, shapes[k]);
         if (!b) break;
         cur = b.grid; placed++; lines += b.lines; boom += b.lines * b.lines;
+        if (b.lines) clears++;
       }
       // Baris/lajur yang dah 6-7 penuh = umpan untuk letupan besar pusingan depan
       let setup = 0;
@@ -215,8 +302,8 @@
         if (rn >= 6) setup++;
         if (cn >= 6) setup++;
       }
-      const r = { placed, lines, boom, setup };
-      if (!best || placed > best.placed || (placed === best.placed && boom * 10 + setup > best.boom * 10 + best.setup)) best = r;
+      const r = { placed, lines, boom, setup, clears };
+      if (!best || placed > best.placed || (placed === best.placed && clears * 30 + boom * 10 + setup > best.clears * 30 + best.boom * 10 + best.setup)) best = r;
     }
     return best;
   }
@@ -250,8 +337,8 @@
     let best = null, bestScore = -1;
     for (const set of candidates) {
       const r = simRateSet(grid, set.map((p) => p.shape));
-      // Utama: semua muat. Lepas tu: letupan besar, dan susun baris untuk letupan depan. Sikit random.
-      const score = r.placed * 1000 + r.boom * 100 + r.setup * 30 + Math.random() * 25;
+      // Utama: semua muat. Lepas tu: banyak langkah yang letup (combo), letupan besar, susun baris untuk depan. Sikit random.
+      const score = r.placed * 1000 + r.clears * 220 + r.boom * 80 + r.setup * 30 + Math.random() * 25;
       if (score > bestScore) { bestScore = score; best = set; }
     }
     tray = best;
@@ -264,6 +351,7 @@
     p.shape.forEach((row) => row.forEach((v) => {
       const b = document.createElement('div');
       b.className = v ? 'blk c' + p.color : 'empty';
+      if (v) b.style.setProperty('--bp', randBP());
       el.appendChild(b);
     }));
     return el;
@@ -489,9 +577,34 @@
     };
   }
 
-  function shatter(toClear, lines, origin) {
+  function shatter(toClear, lines, origin, rows, cols) {
     const t = skin();
-    const tl = gsap.timeline();
+    const tl = gsap.timeline({ delay: 0.05 }); // "hit-stop" sekejap sebelum retak — rasa hentakan
+    // Pancaran cahaya sepanjang baris/lajur yang penuh, memancar dari tempat blok diletak
+    const wrapEl = boardEl.parentElement;
+    const beam = (isRow, i) => {
+      const a = isRow ? cells[i][0] : cells[0][i], z = isRow ? cells[i][N - 1] : cells[N - 1][i];
+      const bm = document.createElement('div');
+      bm.className = 'beam';
+      Object.assign(bm.style, {
+        left: a.offsetLeft - 3 + 'px', top: a.offsetTop - 3 + 'px',
+        width: z.offsetLeft + z.offsetWidth - a.offsetLeft + 6 + 'px', height: z.offsetTop + z.offsetHeight - a.offsetTop + 6 + 'px',
+        transformOrigin: isRow ? ((origin[1] + 0.5) / N * 100) + '% 50%' : '50% ' + ((origin[0] + 0.5) / N * 100) + '%',
+      });
+      wrapEl.appendChild(bm);
+      gsap.timeline({ onComplete: () => bm.remove() })
+        .fromTo(bm, isRow ? { scaleX: 0, opacity: 1 } : { scaleY: 0, opacity: 1 }, isRow ? { scaleX: 1, duration: 0.18, ease: 'power3.out' } : { scaleY: 1, duration: 0.18, ease: 'power3.out' })
+        .to(bm, { opacity: 0, duration: 0.35, ease: 'power1.in' }, 0.2);
+    };
+    rows.forEach((r) => beam(true, r));
+    cols.forEach((c) => beam(false, c));
+    // Papan "terhentak" + gegar ikut saiz letupan
+    gsap.fromTo(boardEl, { scale: 1 + 0.012 * lines }, { scale: 1, duration: 0.6, ease: 'elastic.out(1,0.35)', delay: 0.18, clearProps: 'transform' });
+    const amp = lines >= 2 ? 3 + lines * 2.5 : 2.5;
+    gsap.to(wrapEl, {
+      keyframes: [{ x: -amp, y: amp * 0.5 }, { x: amp, y: -amp * 0.5 }, { x: -amp * 0.6, y: -amp * 0.3 }, { x: amp * 0.35, y: amp * 0.2 }, { x: 0, y: 0 }],
+      duration: 0.32 + lines * 0.04, delay: 0.18, ease: 'none', clearProps: 'transform',
+    });
     toClear.forEach((k) => {
       const r = Math.floor(k / N), c = k % N, el = cells[r][c];
       const color = grid[r][c] || 1;
@@ -511,12 +624,14 @@
       el.appendChild(svg);
       tl.fromTo(paths, { strokeDashoffset: 100 }, { strokeDashoffset: 0, duration: 0.12, ease: 'power1.out' }, delay);
       tl.to(el, { x: rnd(-2, 2), y: rnd(-2, 2), duration: 0.04, repeat: 3, yoyo: true }, delay);
+      tl.to(el, { filter: 'brightness(1.7)', duration: 0.1 }, delay + 0.04);
       // 2) pecah
       tl.add(() => {
         const rect = el.getBoundingClientRect();
         if (grid[r][c]) el.classList.add('shattered'); // kalau papan dah dikosongkan, jangan sorok petak
+        debris(t, rect, color);
         svg.remove();
-        gsap.set(el, { clearProps: 'transform' });
+        gsap.set(el, { clearProps: 'transform,filter' });
         pat.shards.forEach((poly) => {
           const f = document.createElement('div');
           f.className = 'frag c' + color;
@@ -526,6 +641,7 @@
             clipPath: 'polygon(' + poly.map((p) => p[0] + '% ' + p[1] + '%').join(',') + ')',
             transformOrigin: cx + '% ' + cy + '%',
           });
+          f.style.setProperty('--bp', el.style.getPropertyValue('--bp'));
           fxLayer.appendChild(f);
           const dx = (cx - 50) / 50, dy = (cy - 50) / 50, push = 1 + lines * 0.25;
           const done = () => f.remove();
@@ -536,9 +652,9 @@
               .to(f, { opacity: 0, duration: 0.3 }, '-=0.3');
           } else if (t === 'batu') {
             gsap.timeline({ onComplete: done })
-              .to(f, { x: dx * 10 * push, y: dy * 10 * push - 8, duration: 0.12, ease: 'power1.out' })
-              .to(f, { x: '+=' + (dx * 25 + rnd(-15, 15)), y: '+=' + rnd(260, 420), rotation: rnd(-130, 130), duration: rnd(0.7, 0.95), ease: 'power2.in' })
-              .to(f, { opacity: 0, duration: 0.25 }, '-=0.25');
+              .to(f, { x: dx * 12 * push, y: dy * 12 * push - 10, rotation: rnd(-15, 15), duration: 0.16, ease: 'power2.out' })
+              .to(f, { x: '+=' + (dx * 25 + rnd(-15, 15)), y: '+=' + rnd(300, 460), rotation: rnd(-130, 130), duration: rnd(1, 1.3), ease: 'power3.in' })
+              .to(f, { opacity: 0, duration: 0.3 }, '-=0.3');
           } else {
             gsap.timeline({ onComplete: done })
               .to(f, { y: -6 * push, rotation: rnd(-10, 10), duration: 0.1, ease: 'power1.out' })
@@ -558,9 +674,42 @@
         }
       }, delay + 0.14);
     });
-    if (lines >= 2) {
-      boardEl.classList.remove('shake', 'shake-big'); void boardEl.offsetWidth;
-      boardEl.classList.add(lines >= 3 ? 'shake-big' : 'shake');
+  }
+
+  // Habuk / kilauan / habuk kayu bila petak pecah
+  function debris(t, rect, color) {
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const add = (cls, x, y) => {
+      const d = document.createElement('div');
+      d.className = cls;
+      Object.assign(d.style, { left: x + 'px', top: y + 'px' });
+      fxLayer.appendChild(d);
+      return d;
+    };
+    if (t === 'batu') {
+      const puff = add('dust', cx, cy);
+      gsap.fromTo(puff, { scale: 0.4, opacity: 0.75 }, { scale: rnd(1.8, 2.6), opacity: 0, x: rnd(-12, 12), y: rnd(-20, -6), duration: rnd(0.6, 0.9), ease: 'power2.out', onComplete: () => puff.remove() });
+      for (let i = 0; i < 3; i++) {
+        const pb = add('pebble c' + color, cx, cy);
+        pb.style.setProperty('--bp', randBP());
+        gsap.timeline({ onComplete: () => pb.remove() })
+          .to(pb, { x: rnd(-40, 40), y: rnd(-35, -10), rotation: rnd(-180, 180), duration: 0.2, ease: 'power2.out' })
+          .to(pb, { y: '+=' + rnd(250, 380), rotation: '+=' + rnd(-200, 200), duration: rnd(0.6, 0.8), ease: 'power2.in' });
+      }
+    } else if (t === 'kaca') {
+      for (let i = 0; i < 2; i++) {
+        const sp = add('sparkle', cx + rnd(-rect.width / 2, rect.width / 2), cy + rnd(-rect.height / 2, rect.height / 2));
+        gsap.timeline({ onComplete: () => sp.remove(), delay: rnd(0, 0.15) })
+          .fromTo(sp, { scale: 0, rotation: 0 }, { scale: rnd(0.9, 1.5), rotation: 90, duration: 0.18, ease: 'back.out(3)' })
+          .to(sp, { scale: 0, rotation: 180, duration: 0.25, ease: 'power2.in' });
+      }
+    } else {
+      for (let i = 0; i < 4; i++) {
+        const sd = add('sawdust', cx + rnd(-8, 8), cy + rnd(-8, 8));
+        gsap.timeline({ onComplete: () => sd.remove() })
+          .to(sd, { x: rnd(-30, 30), y: rnd(-25, -5), duration: 0.18, ease: 'power2.out' })
+          .to(sd, { x: '+=' + rnd(-15, 15), y: '+=' + rnd(120, 220), opacity: 0, duration: rnd(0.7, 1.1), ease: 'power1.in' });
+      }
     }
   }
 
@@ -598,6 +747,21 @@
   flashEl.className = 'flash';
   fxLayer.appendChild(flashEl);
 
+  // ===== Meter combo atas papan =====
+  const comboEl = $('comboBar'), comboTxt = $('comboTxt'), comboDots = comboEl.querySelectorAll('i');
+  function updateCombo(bumped) {
+    if (!combo) { comboEl.classList.remove('on', 'last'); return; }
+    comboEl.classList.add('on');
+    comboTxt.textContent = '🔥 Combo x' + combo;
+    const left = COMBO_GRACE - miss;
+    comboDots.forEach((d, i) => d.classList.toggle('full', i < left));
+    comboEl.classList.toggle('last', left === 1);
+    if (window.gsap && !reduceMotion) {
+      if (bumped) gsap.fromTo(comboEl, { scale: 1.5 }, { scale: 1, duration: 0.5, ease: 'elastic.out(1,0.45)' });
+      else if (left === 1) gsap.fromTo(comboEl, { x: -5 }, { x: 0, duration: 0.4, ease: 'elastic.out(1,0.3)' });
+    }
+  }
+
   function showPopup(text, size = 1) {
     popupEl.style.setProperty('--size', size);
     popupEl.textContent = text;
@@ -621,13 +785,15 @@
     const lines = rows.length + cols.length;
     if (lines) {
       combo++;
+      miss = 0;
+      updateCombo(true);
       // 1 baris = 10, 2 = 30, 3 = 60 ... darab combo
       const pts = 10 * lines * (lines + 1) / 2 * combo;
       const toClear = new Set();
       rows.forEach((r) => { for (let c = 0; c < N; c++) toClear.add(r * N + c); });
       cols.forEach((c) => { for (let r = 0; r < N; r++) toClear.add(r * N + c); });
       if (window.gsap && !reduceMotion) {
-        shatter(toClear, lines, [r0 + (p.shape.length - 1) / 2, c0 + (p.shape[0].length - 1) / 2]);
+        shatter(toClear, lines, [r0 + (p.shape.length - 1) / 2, c0 + (p.shape[0].length - 1) / 2], rows, cols);
       } else {
         toClear.forEach((k) => cells[Math.floor(k / N)][k % N].classList.add('clearing'));
         boom(toClear, lines);
@@ -647,9 +813,13 @@
           busy = true; // tunggu tulisan combo habis dulu, baru tukar tema
           setTimeout(changeSkin, 450);
         }
-      }, 380);
+      }, 450); // tunggu semua petak habis retak & pecah
     } else {
-      combo = 0;
+      if (combo) {
+        miss++;
+        if (miss >= COMBO_GRACE) { combo = 0; miss = 0; }
+      }
+      updateCombo(false);
       afterMove();
     }
   }
@@ -658,7 +828,7 @@
     render();
     if (tray.every((p) => !p)) newTray();
     renderTray();
-    store.set('blokboom-save', { grid, tray, score, combo });
+    store.set('blokboom-save', { grid, tray, score, combo, miss });
     if (!tray.some((p) => p && canFitAnywhere(p.shape))) gameOver();
   }
 
@@ -675,7 +845,8 @@
   let startBest = 0;
   function newGame() {
     grid = Array.from({ length: N }, () => Array(N).fill(0));
-    score = 0; combo = 0;
+    score = 0; combo = 0; miss = 0;
+    updateCombo(false);
     startBest = best;
     scoreEl.textContent = 0;
     overEl.hidden = true;
@@ -697,6 +868,8 @@
   const saved = store.get('blokboom-save', null);
   if (saved && saved.grid && saved.tray) {
     ({ grid, tray, score, combo } = saved);
+    miss = saved.miss || 0;
+    updateCombo(false);
     grid = grid.map((row) => row.map(fixColor));
     tray = tray.map((p) => (p ? { ...p, color: fixColor(p.color) } : p));
     startBest = best;

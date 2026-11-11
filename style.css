@@ -3,15 +3,14 @@
   color-scheme:dark;
 }
 /* ===== TEMA =====
-   Setiap tema: latar, papan, 4 warna blok (--hi terang / --lo gelap), tekstur (--tex), bentuk bucu (--rad) */
+   Setiap tema: latar, papan, 4 warna blok (--hi terang / --lo gelap), bentuk bucu (--rad).
+   Tekstur (--tex-img) dilukis guna canvas dalam game.js; --tex-top = kilat/bayang atas tekstur. */
 body,body[data-skin="batu"]{
   --bg1:#191716; --bg2:#3a3430; --panel:#2b2724; --cellbg:#221f1d; --line:#46403a;
   --muted:#c9beb3; --accent:#ffb44a; --rad:3px;
-  --tex:radial-gradient(circle at 26% 30%,rgba(255,255,255,.22) 0 1.5px,transparent 2.5px),
-        radial-gradient(circle at 72% 64%,rgba(0,0,0,.30) 0 2px,transparent 3px),
-        radial-gradient(circle at 58% 20%,rgba(0,0,0,.22) 0 1.2px,transparent 2.2px),
-        radial-gradient(circle at 30% 78%,rgba(255,255,255,.12) 0 1.2px,transparent 2.2px);
-  --bevel:inset 0 -3px 0 rgba(0,0,0,.35),inset 0 2px 0 rgba(255,255,255,.25),inset 2px 0 0 rgba(255,255,255,.08);
+  --tex-top:linear-gradient(135deg,rgba(255,255,255,.16),transparent 38%,transparent 62%,rgba(0,0,0,.22));
+  --tex-blend:overlay;
+  --bevel:inset 0 -3px 0 rgba(0,0,0,.45),inset -2px 0 0 rgba(0,0,0,.25),inset 0 2px 0 rgba(255,255,255,.28),inset 2px 0 0 rgba(255,255,255,.12);
   --edge:none;
 }
 body[data-skin="batu"] .c1{--hi:#a39e98;--lo:#5d5955}   /* granit */
@@ -22,7 +21,8 @@ body[data-skin="batu"] .c4{--hi:#d4c3a3;--lo:#8f7c5c}   /* batu kapur */
 body[data-skin="kaca"]{
   --bg1:#081a2e; --bg2:#1a4d73; --panel:#13304d; --cellbg:rgba(255,255,255,.06); --line:#24557c;
   --muted:#a9d4f0; --accent:#7fe9ff; --rad:6px;
-  --tex:linear-gradient(135deg,rgba(255,255,255,.65) 0 14%,transparent 15% 46%,rgba(255,255,255,.22) 47% 54%,transparent 55%);
+  --tex-top:linear-gradient(135deg,rgba(255,255,255,.65) 0 14%,transparent 15% 46%,rgba(255,255,255,.22) 47% 54%,transparent 55%);
+  --tex-blend:normal;
   --bevel:inset 0 0 0 1px rgba(255,255,255,.55),inset 0 -4px 8px rgba(0,0,0,.18),0 0 10px var(--glow);
   --edge:none;
 }
@@ -34,8 +34,8 @@ body[data-skin="kaca"] .c4{--hi:rgba(170,255,215,.9);--lo:rgba(30,170,120,.75);-
 body[data-skin="pokok"]{
   --bg1:#122010; --bg2:#2e4a1e; --panel:#21361a; --cellbg:#1a2c15; --line:#3a5729;
   --muted:#c7deb0; --accent:#ffd36b; --rad:4px;
-  --tex:repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 1.5px,transparent 1.5px 6px),
-        radial-gradient(ellipse 40% 18% at 62% 58%,transparent 55%,rgba(0,0,0,.22) 60% 70%,transparent 75%);
+  --tex-top:radial-gradient(ellipse at 50% 45%,transparent 45%,rgba(0,0,0,.22));
+  --tex-blend:overlay;
   --bevel:inset 0 -3px 0 rgba(0,0,0,.3),inset 0 2px 0 rgba(255,255,255,.22);
   --edge:none;
 }
@@ -81,7 +81,12 @@ body{
 @keyframes place{0%{transform:scale(.7)}100%{transform:scale(1)}}
 
 /* blok: warna ikut tema */
-.c1,.c2,.c3,.c4{background:var(--tex),linear-gradient(145deg,var(--hi),var(--lo));box-shadow:var(--bevel);border-radius:var(--rad)!important}
+.c1,.c2,.c3,.c4{
+  background-image:var(--tex-img,none),var(--tex-top),linear-gradient(145deg,var(--hi),var(--lo));
+  background-size:220% 220%,100% 100%,100% 100%;
+  background-position:var(--bp,30% 40%),0 0,0 0;
+  background-blend-mode:var(--tex-blend),normal,normal;
+  box-shadow:var(--bevel);border-radius:var(--rad)!important}
 .cell,.score-box,.icon,.board,.card{transition:background-color .4s}
 .board{perspective:700px}
 
@@ -147,3 +152,25 @@ body[data-skin="pokok"] .crack path{stroke:rgba(40,20,5,.85);stroke-width:4}
 .banner{position:absolute;left:50%;top:48%;translate:-50% -50%;z-index:6;visibility:hidden;pointer-events:none;
   font-size:min(54px,13vw);font-weight:900;letter-spacing:1px;white-space:nowrap;color:var(--accent);
   text-shadow:0 4px 0 rgba(0,0,0,.45),0 0 24px var(--accent),0 10px 24px rgba(0,0,0,.6)}
+
+/* ===== meter combo ===== */
+.combo{position:absolute;left:50%;top:0;translate:-50% -55%;z-index:7;display:flex;align-items:center;gap:8px;
+  background:var(--panel);border:2px solid var(--accent);border-radius:999px;padding:3px 12px;
+  box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+.combo.on{opacity:1}
+.combo b{font-size:14px;color:var(--accent)}
+.combo .dots{display:flex;gap:4px}
+.combo i{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.18)}
+.combo i.full{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.combo.last i.full{background:#ff6b5b;box-shadow:0 0 8px #ff6b5b}
+
+/* ===== kesan letupan tambahan ===== */
+.beam{position:absolute;z-index:4;pointer-events:none;border-radius:8px;mix-blend-mode:screen;
+  background:linear-gradient(90deg,transparent,var(--accent) 15%,#fff 50%,var(--accent) 85%,transparent);
+  box-shadow:0 0 18px 4px var(--accent)}
+.dust{position:fixed;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;
+  background:radial-gradient(circle,rgba(235,225,210,.85),rgba(190,180,165,.45) 40%,transparent 70%)}
+.pebble{position:fixed;width:7px;height:6px;margin:-3px 0 0 -3px;clip-path:polygon(10% 0,90% 15%,100% 70%,40% 100%,0 60%)}
+.sparkle{position:fixed;width:16px;height:16px;margin:-8px 0 0 -8px;background:#fff;
+  clip-path:polygon(50% 0,60% 40%,100% 50%,60% 60%,50% 100%,40% 60%,0 50%,40% 40%);filter:drop-shadow(0 0 4px #bff4ff)}
+.sawdust{position:fixed;width:4px;height:3px;border-radius:1px;background:#d8b47a}
