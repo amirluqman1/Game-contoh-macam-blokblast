@@ -155,26 +155,42 @@
     return { cell: a.width, pitch: b.left - a.left, x0: a.left, y0: a.top };
   }
 
+  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const PICKUP_MS = reduceMotion ? 0 : 140;
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+
   function startDrag(e) {
-    if (busy) return;
-    const i = +e.currentTarget.dataset.i;
+    if (busy || drag) return;
+    const slot = e.currentTarget;
+    if (slot._finishReturn) slot._finishReturn(); // tengah terbang balik? siapkan terus
+    if (slot.classList.contains('dragging')) return;
+    const i = +slot.dataset.i;
     const p = tray[i];
     if (!p) return;
     e.preventDefault();
     const m = metrics();
-    const fl = pieceEl(p, 'piece floating');
-    fl.style.setProperty('--cell', m.cell + 'px');
-    fl.style.gap = (m.pitch - m.cell) + 'px';
+    const src = slot.querySelector('.piece').getBoundingClientRect();
+    const fl = document.createElement('div');
+    fl.className = 'floating';
+    const inner = pieceEl(p);
+    inner.style.setProperty('--cell', m.cell + 'px');
+    inner.style.gap = (m.pitch - m.cell) + 'px';
+    fl.appendChild(inner);
     document.body.appendChild(fl);
     const w = p.shape[0].length * m.pitch, h = p.shape.length * m.pitch;
     // Kat phone, angkat blok atas jari supaya nampak
     const lift = e.pointerType === 'touch' ? h / 2 + m.cell * 1.6 : h / 2;
-    drag = { i, p, fl, w, h, lift, slot: e.currentTarget, m, pos: null, pid: e.pointerId };
-    drag.slot.classList.add('dragging');
-    moveDrag(e);
+    drag = {
+      i, p, fl, w, h, lift, slot, m, pos: null, pid: e.pointerId,
+      fx: e.clientX, fy: e.clientY, t0: performance.now(),
+      sx: src.left + src.width / 2, sy: src.top + src.height / 2,
+      k: src.width / w, raf: 0,
+    };
+    slot.classList.add('dragging');
     window.addEventListener('pointermove', moveDrag);
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
+    frame();
   }
 
   function clearPreview() {
@@ -187,8 +203,26 @@
 
   function moveDrag(e) {
     if (!drag || e.pointerId !== drag.pid) return;
-    const x = e.clientX - drag.w / 2, y = e.clientY - drag.lift;
-    drag.fl.style.transform = `translate(${x}px, ${y}px)`;
+    drag.fx = e.clientX; drag.fy = e.clientY;
+    if (!drag.raf) drag.raf = requestAnimationFrame(frame);
+  }
+
+  // Satu kemas kini setiap frame skrin, bukan setiap kali jari bergerak
+  function frame() {
+    if (!drag) return;
+    drag.raf = 0;
+    const t = PICKUP_MS ? Math.min(1, (performance.now() - drag.t0) / PICKUP_MS) : 1;
+    const e = ease(t);
+    // Titik sasaran: tengah blok, atas jari
+    const tx = drag.fx, ty = drag.fy - drag.lift + drag.h / 2;
+    const cx = drag.sx + (tx - drag.sx) * e, cy = drag.sy + (ty - drag.sy) * e;
+    const sc = drag.k + (1 - drag.k) * e;
+    drag.fl.style.transform = `translate3d(${cx - drag.w / 2}px, ${cy - drag.h / 2}px, 0) scale(${sc})`;
+    if (t < 1) drag.raf = requestAnimationFrame(frame);
+    updatePreview(tx - drag.w / 2, ty - drag.h / 2);
+  }
+
+  function updatePreview(x, y) {
     const { pitch, x0, y0 } = drag.m;
     const c0 = Math.round((x - x0) / pitch), r0 = Math.round((y - y0) / pitch);
     const pos = fits(drag.p.shape, r0, c0) ? [r0, c0] : null;
@@ -209,12 +243,29 @@
     window.removeEventListener('pointermove', moveDrag);
     window.removeEventListener('pointerup', endDrag);
     window.removeEventListener('pointercancel', endDrag);
+    if (drag.raf) cancelAnimationFrame(drag.raf);
     clearPreview();
-    drag.fl.remove();
-    drag.slot.classList.remove('dragging');
-    const { pos, i, p } = drag;
+    const d = drag;
     drag = null;
-    if (pos && e.type === 'pointerup') place(i, p, pos[0], pos[1]);
+    if (d.pos && e.type === 'pointerup') {
+      d.fl.remove();
+      d.slot.classList.remove('dragging');
+      place(d.i, d.p, d.pos[0], d.pos[1]);
+      return;
+    }
+    // Tak muat: blok terbang balik ke tray
+    let timer = 0;
+    const done = () => {
+      clearTimeout(timer);
+      d.slot._finishReturn = null;
+      d.fl.remove();
+      d.slot.classList.remove('dragging');
+    };
+    if (reduceMotion) return done();
+    d.slot._finishReturn = done;
+    d.fl.style.transition = 'transform .18s cubic-bezier(.2,.8,.3,1)';
+    d.fl.style.transform = `translate3d(${d.sx - d.w / 2}px, ${d.sy - d.h / 2}px, 0) scale(${d.k})`;
+    timer = setTimeout(done, 190);
   }
 
   // ---------- main logic ----------
