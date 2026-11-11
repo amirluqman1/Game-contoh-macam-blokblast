@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Blok Boom</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div class="brand">💥 Blok Boom</div>
+    <div class="actions">
+      <button class="icon" id="sound" aria-label="Bunyi">🔊</button>
+      <button class="icon" id="restart" aria-label="Main semula">↻</button>
+    </div>
+  </header>
+
+  <section class="scores">
+    <div class="score-box"><span>SKOR</span><b id="score">0</b></div>
+    <div class="score-box best"><span>👑 TERBAIK</span><b id="best">0</b></div>
+  </section>
+
+  <div class="board-wrap">
+    <div class="board" id="board"></div>
+    <div class="popup" id="popup"></div>
+  </div>
+
+  <div class="tray" id="tray"></div>
+  <p class="hint">Tarik blok ke papan. Penuhkan baris atau lajur untuk letupkan! 💣</p>
+
+  <div class="overlay" id="over" hidden>
+    <div class="card">
+      <h2>Tak muat dah! 😵</h2>
+      <p>Skor kau</p>
+      <div class="final" id="final">0</div>
+      <p class="newbest" id="newbest" hidden>🎉 Rekod baru!</p>
+      <button class="primary" id="again">Main lagi</button>
+    </div>
+  </div>
+</main>
+<script src="game.js"></script>
+</body>
+</html>
