@@ -67,7 +67,7 @@ body{
 .score-box b.bump{animation:bump .3s}
 @keyframes bump{50%{transform:scale(1.15)}}
 
-.board-wrap{position:relative;align-self:center;width:min(100%,calc(100vh - 330px),420px)}
+.board-wrap{position:relative;align-self:center;width:min(100%,calc(100vh - 300px),420px)}
 .board{
   display:grid;grid-template-columns:repeat(8,1fr);gap:var(--gap);padding:6px;
   background:var(--line);border-radius:14px;aspect-ratio:1;box-shadow:0 10px 30px #0006;
@@ -105,7 +105,6 @@ body{
 .floating .blk,.floating .empty{width:var(--cell);height:var(--cell);border-radius:5px}
 .floating .blk{box-shadow:var(--bevel),0 6px 10px rgba(0,0,0,.35)}
 
-.hint{text-align:center;color:var(--muted);font-size:13px;margin:0}
 
 .popup{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);pointer-events:none;
   font-weight:900;font-size:calc(min(32px, 7.5vw) * var(--size,1));color:var(--accent);text-shadow:0 3px 0 #a1470d,0 6px 16px #000a;
