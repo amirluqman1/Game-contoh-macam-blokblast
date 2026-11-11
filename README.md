@@ -11,6 +11,19 @@ Buka `index.html` dalam browser (phone pun boleh).
 - Papan bersih habis → bonus +300
 - Tak ada blok yang muat → kalah
 
+## Tema
+Ada 3 tema, setiap satu dengan 4 warna sendiri dan cara pecah sendiri:
+
+| Tema | Rupa | Cara pecah |
+|---|---|---|
+| 🪨 Batu | granit, batu pasir, batu loh, batu kapur | retak bergerigi, pecah jadi 4 ketul, jatuh |
+| 💎 Kaca | kaca berwarna lut sinar | retak bintang, serpihan terpelanting lalu jatuh |
+| 🌳 Pokok | kayu dan daun | terbelah jadi 3 papan kayu, daun melayang |
+
+Dapat **3 letupan berturut-turut** (combo x3, x6, x9...) → petak flip macam gelombang dan tema bertukar.
+
+Animasi letupan guna [GSAP](https://gsap.com) dari cdnjs. Kalau GSAP tak dapat load (contoh: offline), game masih jalan dengan letupan ringkas.
+
 ## Blok yang keluar
 Tak random bulat-bulat. Setiap kali bagi 3 blok baru, game cabut 6–12 set calon dan "cuba letak" setiap set dalam simulasi, pastu pilih set yang:
 
