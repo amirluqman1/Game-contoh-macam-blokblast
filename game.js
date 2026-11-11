@@ -294,6 +294,7 @@
     startBest = best;
     scoreEl.textContent = 0;
     overEl.hidden = true;
+    $('ask').hidden = true;
     newTray();
     render();
     renderTray();
@@ -318,7 +319,12 @@
     newGame();
   }
 
-  $('restart').onclick = () => { if (!busy && (score === 0 || confirm('Mula semula? Skor sekarang hilang.'))) newGame(); };
+  $('restart').onclick = () => {
+    if (busy) return;
+    if (score === 0) newGame(); else $('ask').hidden = false;
+  };
+  $('askNo').onclick = () => { $('ask').hidden = true; };
+  $('askYes').onclick = () => { $('ask').hidden = true; newGame(); };
   $('again').onclick = newGame;
   $('sound').onclick = () => {
     soundOn = !soundOn;
