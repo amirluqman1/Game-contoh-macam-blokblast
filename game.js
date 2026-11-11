@@ -105,18 +105,18 @@
   }
 
   // ---------- tray ----------
-  // Bantuan bila papan sesak: papan bawah 40% penuh = random biasa.
+  // Bantuan bila papan sesak: papan bawah 30% penuh = random biasa.
   // Lepas tu makin penuh, makin tinggi peluang dapat blok kecil.
   // Tak pernah sengaja bagi blok susah.
   const cellCount = (shape) => shape.flat().filter(Boolean).length;
 
   function helpLevel() {
     const filled = grid.flat().filter(Boolean).length / (N * N);
-    return Math.min(1, Math.max(0, (filled - 0.4) / 0.35)); // 0 bila <=40% penuh, 1 bila >=75%
+    return Math.min(1, Math.max(0, (filled - 0.3) / 0.35)); // 0 bila <=30% penuh, 1 bila >=65%
   }
 
   function randomPiece(help) {
-    const weights = SHAPES.map((sh) => 1 / Math.pow(cellCount(sh), 1.5 * help));
+    const weights = SHAPES.map((sh) => 1 / Math.pow(cellCount(sh), 2 * help));
     let x = Math.random() * weights.reduce((a, b) => a + b, 0);
     let k = 0;
     while (k < SHAPES.length - 1 && (x -= weights[k]) > 0) k++;
@@ -239,9 +239,15 @@
 
   function updatePreview(x, y) {
     const { pitch, x0, y0 } = drag.m;
-    const c0 = Math.round((x - x0) / pitch), r0 = Math.round((y - y0) / pitch);
+    const fc = (x - x0) / pitch, fr = (y - y0) / pitch;
+    // "Melekat": selagi blok tak lari jauh dari petak sekarang, kekal kat situ.
+    // Elak bayang melompat-lompat bila blok tepat di tengah antara dua petak.
+    const cur = drag.pos;
+    if (cur && Math.abs(fc - cur[1]) < 0.75 && Math.abs(fr - cur[0]) < 0.75) return;
+    const c0 = Math.round(fc), r0 = Math.round(fr);
     const pos = fits(drag.p.shape, r0, c0) ? [r0, c0] : null;
     if (String(pos) === String(drag.pos)) return;
+    if (drag.pos) { drag.prevPos = drag.pos; drag.changedAt = performance.now(); }
     drag.pos = pos;
     clearPreview();
     if (!pos) return;
@@ -262,6 +268,11 @@
     clearPreview();
     const d = drag;
     drag = null;
+    // Jari tergelincir masa diangkat? Kalau bayang baru berubah <100ms sebelum lepas,
+    // guna tempat sebelum tu (yang kau nampak lebih lama).
+    // Hanya untuk gelincir kecil (petak sebelah), bukan bila sengaja tarik keluar untuk batal.
+    if (d.pos && d.prevPos && performance.now() - d.changedAt < 100 &&
+        Math.abs(d.pos[0] - d.prevPos[0]) + Math.abs(d.pos[1] - d.prevPos[1]) === 1) d.pos = d.prevPos;
     if (d.pos && e.type === 'pointerup') {
       d.fl.remove();
       d.slot.classList.remove('dragging');
