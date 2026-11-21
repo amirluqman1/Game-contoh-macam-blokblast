@@ -1,0 +1,1123 @@
+<!doctype html>
+<!--
+=====================================================================
+ pulau-contoh.html : Pulau Pelita (versi belajar, dikomen)
+ Game 3D open world dalam SATU fail. Buka terus dalam browser.
+
+ Susunan fail ni (baca ikut urutan):
+   1. <head>      : tajuk, font, dan CSS (rupa HUD & menu)
+   2. <body>      : HTML (kanvas 3D, panel HUD, joystick, menu depan)
+   3. <script>    : JavaScript, iaitu otak game. Dibahagi ikut seksyen:
+        A. Alat bantu (nombor rawak, Perlin noise, fbm)
+        B. Formula dunia H(x, z)   <-- jantung game ni
+        C. Simpanan (localStorage)
+        D. Renderer, scene, cahaya, langit, air
+        E. Bentuk kongsi (pokok, batu, pelita)
+        F. Chunk: bina & buang kawasan dunia
+        G. Watak pemain
+        H. Kawalan (keyboard, tetikus, sentuhan)
+        I. Bunyi
+        J. HUD & peta mini
+        K. Siang / malam
+        L. Update setiap frame (pemain, kamera, pelita)
+        M. Game loop
+
+ Cara baca komen: komen (// ...) duduk SEBELUM kod yang dia terangkan,
+ atau di hujung baris kalau baris tu pendek.
+=====================================================================
+-->
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover: benarkan page penuh sampai bawah "notch" phone -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pulau Pelita</title>
+
+<!-- Font dari Google Fonts: Young Serif (tajuk) dan Figtree (teks UI) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&family=Figtree:wght@400;600;700&display=swap">
+
+<style>
+/* ---------------------------------------------------------------
+   CSS: semua warna disimpan sebagai "token" (pemboleh ubah CSS)
+   dalam :root. Nak tukar tema? Ubah nilai kat sini je.
+   --------------------------------------------------------------- */
+:root {
+  --ink: #0e1726;                     /* latar paling gelap */
+  --panel: rgba(12, 20, 34, .66);     /* panel HUD separa lutsinar */
+  --line: rgba(255, 226, 170, .20);   /* garisan sempadan */
+  --text: #f6efe2;
+  --muted: #c8bca6;
+  --amber: #ffc65c;                   /* warna pelita */
+  --amber-deep: #e48a2a;
+  --font-display: "Young Serif", Georgia, "Times New Roman", serif;
+  --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* env(safe-area-inset-*) = jarak selamat dari notch / bar sistem phone */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  color-scheme: dark;
+}
+
+/* [hidden] = elemen yang kita sorok guna el.hidden = true dalam JS */
+[hidden] { display: none !important; }
+
+html, body {
+  height: 100%; margin: 0; overflow: hidden;
+  background: var(--ink); color: var(--text); font-family: var(--font-ui);
+}
+body {
+  /* elak teks terpilih & kotak biru bila tekan lama kat phone */
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Kanvas 3D penuh skrin. touch-action:none = jangan biar browser
+   scroll / zum bila jari seret atas kanvas (kita nak guna untuk kawalan) */
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#game:active { cursor: grabbing; }
+
+/* Panel kaca kabur yang dipakai HUD */
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+
+/* Lapisan HUD atas kanvas. pointer-events:none = klik "tembus" ke kanvas */
+.hud { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+
+/* Penjuru kiri atas: nama game, kiraan pelita, jam */
+.hud-tl { position: absolute; top: calc(12px + var(--sat)); left: calc(12px + var(--sal)); padding: 10px 14px; display: grid; gap: 4px; }
+.brand { font-family: var(--font-display); font-size: 18px; color: var(--amber); }
+.stats { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.stats b { color: var(--text); font-size: 16px; }
+/* ikon pelita kecil dilukis guna CSS je (gradient + bayang bercahaya) */
+.lamp { width: 10px; height: 14px; border-radius: 5px 5px 3px 3px; background: radial-gradient(circle at 50% 60%, #fff3c4, var(--amber) 45%, var(--amber-deep)); box-shadow: 0 0 10px var(--amber); }
+
+/* Penjuru kanan atas: peta mini + koordinat */
+.hud-tr { position: absolute; top: calc(12px + var(--sat)); right: calc(12px + var(--sar)); display: grid; justify-items: end; gap: 6px; }
+#map { width: 132px; height: 132px; border-radius: 50%; border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.35); background: #173a55; }
+.coords { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+
+/* Tengah atas: anak panah ke pelita terdekat */
+.seek { position: absolute; top: calc(14px + var(--sat)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 8px 14px 8px 10px; font-size: 13px; white-space: nowrap; }
+.seek small { display: block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.seek b { font-variant-numeric: tabular-nums; font-size: 15px; }
+.arrow { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,198,92,.14); display: grid; place-items: center; }
+/* clip-path potong kotak jadi bentuk anak panah. JS pusingkan guna transform: rotate() */
+.arrow i { display: block; width: 12px; height: 14px; background: var(--amber); clip-path: polygon(50% 0, 100% 100%, 50% 76%, 0 100%); transition: transform .12s linear; }
+
+/* Mesej "+1 pelita" yang timbul kat tengah skrin */
+.toast { position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); font-family: var(--font-display); font-size: clamp(20px, 4vw, 30px); color: var(--amber); text-shadow: 0 0 18px rgba(255,170,60,.7), 0 2px 6px rgba(0,0,0,.6); opacity: 0; transition: opacity .3s, transform .3s; text-align: center; max-width: 90vw; }
+.toast.show { opacity: 1; transform: translate(-50%, -60%); }
+.toast span { display: block; font-family: var(--font-ui); font-size: 14px; color: var(--text); margin-top: 4px; }
+
+/* Kiri bawah: senarai kekunci (PC sahaja) */
+.hint { position: absolute; left: calc(12px + var(--sal)); bottom: calc(12px + var(--sab)); padding: 8px 12px; font-size: 12px; color: var(--muted); max-width: min(520px, 70vw); }
+.hint kbd { font-family: var(--font-ui); font-weight: 700; color: var(--text); background: rgba(255,255,255,.08); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+
+/* Butang kecil (contoh: Bunyi On/Off). pointer-events:auto = butang boleh ditekan
+   walaupun bekas HUD dia pointer-events:none */
+.btn { pointer-events: auto; font-family: var(--font-ui); font-weight: 600; font-size: 13px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.btn:focus-visible, #startBtn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+.hud-br { position: absolute; right: calc(12px + var(--sar)); bottom: calc(12px + var(--sab)); display: flex; gap: 8px; }
+
+/* Joystick phone: muncul kat tempat jari sentuh. margin negatif = tengahkan bulatan atas jari */
+#joy { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid rgba(255,226,170,.35); background: rgba(12,20,34,.35); z-index: 3; pointer-events: none; }
+#joyKnob { position: absolute; left: 50%; top: 50%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; background: rgba(255,198,92,.55); }
+
+/* Butang Lompat & Lari (phone) */
+.touch-btns { position: fixed; right: calc(16px + var(--sar)); bottom: calc(64px + var(--sab)); display: grid; gap: 12px; justify-items: end; z-index: 3; }
+.touch-btns button { pointer-events: auto; width: 72px; height: 72px; border-radius: 50%; font-family: var(--font-ui); font-weight: 700; font-size: 13px; color: var(--ink); background: var(--amber); border: none; box-shadow: 0 6px 18px rgba(0,0,0,.4); touch-action: none; }
+.touch-btns button.run { width: 56px; height: 56px; background: var(--panel); color: var(--text); border: 1px solid var(--line); }
+.touch-btns button.run.on { background: var(--amber-deep); color: var(--ink); }
+
+/* Menu depan */
+.intro { position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; padding: calc(16px + var(--sat)) max(16px, var(--sar)) calc(16px + var(--sab)) max(16px, var(--sal)); background: linear-gradient(180deg, rgba(14,23,38,.25), rgba(14,23,38,.78)); }
+.card { max-width: 440px; width: 100%; padding: 26px 24px 22px; display: grid; gap: 14px; }
+.card h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(34px, 7vw, 46px); line-height: 1.05; color: var(--amber); text-shadow: 0 0 24px rgba(255,170,60,.35); }
+.card p { margin: 0; line-height: 1.55; font-size: 15px; }
+.card .fine { font-size: 12.5px; color: var(--muted); }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13.5px; color: var(--muted); margin: 0; }
+.keys dt { color: var(--text); font-weight: 700; }
+.keys dd { margin: 0; }
+#startBtn { justify-self: start; font-family: var(--font-ui); font-weight: 700; font-size: 16px; color: var(--ink); background: linear-gradient(180deg, #ffd789, var(--amber) 60%, var(--amber-deep)); border: none; border-radius: 999px; padding: 12px 22px; cursor: pointer; box-shadow: 0 6px 22px rgba(228,138,42,.45); }
+
+/* (pointer: coarse) = skrin sentuh. Tukar arahan PC <-> phone */
+.touch-only { display: none; }
+@media (pointer: coarse) { .touch-only { display: grid; } .mouse-only { display: none; } .hint { display: none; } }
+/* Skrin kecil: peta kecilkan, anak panah turun ke bawah panel supaya tak bertindih */
+@media (max-width: 640px) { #map { width: 104px; height: 104px; } .seek { top: calc(86px + var(--sat)); } .brand { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .toast, .arrow i { transition: none; } }
+</style>
+</head>
+
+<body>
+<!-- =============================================================
+     HTML. Kanvas = tempat dunia 3D dilukis. Selebihnya HUD.
+     Setiap elemen yang JS perlu ubah ada id (cangkuk untuk JS).
+     ============================================================= -->
+<canvas id="game" aria-label="Dunia Pulau Pelita"></canvas>
+
+<div class="hud" id="hud">
+  <div class="hud-tl panel">
+    <div class="brand">Pulau Pelita</div>
+    <div class="stats"><span class="lamp" aria-hidden="true"></span><b id="count">0</b> pelita <span aria-hidden="true">·</span> <span id="clock">07:40</span></div>
+  </div>
+  <div class="seek panel" id="seek">
+    <div class="arrow"><i id="seekArrow"></i></div>
+    <div><small>Pelita terdekat</small><b id="seekText">mencari…</b></div>
+  </div>
+  <div class="hud-tr">
+    <!-- width/height 264 tapi CSS 132px = lukis 2x lebih tajam untuk skrin retina -->
+    <canvas id="map" width="264" height="264" aria-label="Peta mini"></canvas>
+    <div class="coords" id="coords">X 0 · Z 0</div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <div class="hint panel" id="hint"><kbd>WASD</kbd> gerak · <kbd>Shift</kbd> lari · <kbd>Space</kbd> lompat · seret tetikus pusing kamera · roda zum · <kbd>Esc</kbd> menu</div>
+  <div class="hud-br"><button class="btn" id="btnSound" type="button">Bunyi: On</button></div>
+</div>
+
+<!-- Joystick & butang phone (disorok sampai perlu) -->
+<div id="joy" hidden><div id="joyKnob"></div></div>
+<div class="touch-btns" id="touchBtns" hidden>
+  <button class="run" id="btnRun" type="button">Lari</button>
+  <button id="btnJump" type="button">Lompat</button>
+</div>
+
+<!-- Menu depan -->
+<div class="intro" id="intro">
+  <div class="card panel">
+    <h1>Pulau Pelita</h1>
+    <p>Kepulauan ni luas dan tak ada hujung. Pelita lama bertaburan di pantai, dalam hutan dan atas puncak gunung. Ikut tiang cahaya, kumpul sebanyak mana yang kau mampu. Makin banyak pelita, makin terang lampu kau waktu malam.</p>
+    <dl class="keys mouse-only">
+      <dt>WASD / anak panah</dt><dd>Berjalan</dd>
+      <dt>Shift</dt><dd>Lari</dd>
+      <dt>Space</dt><dd>Lompat</dd>
+      <dt>Seret tetikus</dt><dd>Pusing kamera, roda untuk zum</dd>
+    </dl>
+    <dl class="keys touch-only">
+      <dt>Kiri skrin</dt><dd>Sentuh &amp; seret untuk berjalan</dd>
+      <dt>Kanan skrin</dt><dd>Seret untuk pusing kamera</dd>
+      <dt>Butang</dt><dd>Lompat dan Lari</dd>
+    </dl>
+    <button id="startBtn" type="button">Mula jelajah</button>
+    <p class="fine">Dunia ni sama untuk semua orang. Kemajuan kau disimpan dalam browser ni sahaja.</p>
+  </div>
+</div>
+
+<!-- three.js: library 3D. Mesti dimuat SEBELUM skrip kita sebab skrip kita guna THREE.xxx -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<script>
+// IIFE: semua kod dalam ni "terkurung", tak bocor jadi pemboleh ubah global
+(function () {
+"use strict"; // mod ketat: JS akan tegur kesilapan biasa (contoh guna pemboleh ubah tak diisytihar)
+
+// Kalau three.js gagal dimuat (contoh offline), tunjuk mesej dan berhenti
+if (!window.THREE) {
+  document.getElementById('intro').querySelector('.card').innerHTML =
+    '<h1>Pulau Pelita</h1><p>Enjin 3D tak dapat dimuatkan. Semak sambungan internet dan muat semula page ni.</p>';
+  return;
+}
+
+// =====================================================================
+// A. ALAT BANTU
+// =====================================================================
+
+// SEED = "benih" dunia. Seed sama -> dunia sama. Tukar nombor ni = pulau lain terus.
+const SEED = 20261121;
+
+// mulberry32: penjana nombor rawak yang BOLEH DIULANG.
+// Math.random() bagi nombor lain setiap kali. Yang ni pula, kalau diberi seed sama,
+// dia keluarkan susunan nombor yang sama persis. Pulangkan nombor antara 0 dan 1.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// makePerlin: cipta fungsi Perlin noise. Noise ni "rawak tapi licin":
+// titik yang berdekatan dapat nilai yang hampir sama. Sebab tu bukit nampak beralun,
+// bukan berduri. Nilai keluar lebih kurang antara -1 dan 1.
+function makePerlin(seed) {
+  const rnd = mulberry32(seed);
+  // Jadual 0..255 dikocok rawak (ikut seed)
+  const perm = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) perm[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const t = perm[i]; perm[i] = perm[j]; perm[j] = t;
+  }
+  // Gandakan jadual jadi 512 supaya tak perlu check "terkeluar hujung"
+  const p = new Uint8Array(512);
+  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  // 8 arah kecerunan (gradient) yang mungkin bagi setiap bucu grid
+  const gx = [1, -1, 1, -1, 1, -1, 0, 0], gy = [1, 1, -1, -1, 0, 0, 1, -1];
+
+  return function (x, y) {
+    // Cari petak grid mana titik ni duduk, dan kedudukan dalam petak (0..1)
+    const X = Math.floor(x), Y = Math.floor(y);
+    const xf = x - X, yf = y - Y;
+    const xi = X & 255, yi = Y & 255;
+    // fade: lengkung S supaya peralihan antara petak licin (6t^5 - 15t^4 + 10t^3)
+    const u = xf * xf * xf * (xf * (xf * 6 - 15) + 10);
+    const v = yf * yf * yf * (yf * (yf * 6 - 15) + 10);
+    // Ambil arah kecerunan untuk 4 bucu petak
+    const aa = p[p[xi] + yi] & 7, ab = p[p[xi] + yi + 1] & 7;
+    const ba = p[p[xi + 1] + yi] & 7, bb = p[p[xi + 1] + yi + 1] & 7;
+    // Pengaruh setiap bucu = dot product (kecerunan . jarak ke titik)
+    const n00 = gx[aa] * xf + gy[aa] * yf;
+    const n10 = gx[ba] * (xf - 1) + gy[ba] * yf;
+    const n01 = gx[ab] * xf + gy[ab] * (yf - 1);
+    const n11 = gx[bb] * (xf - 1) + gy[bb] * (yf - 1);
+    // Adun 4 nilai tu (lerp mendatar, lepas tu menegak)
+    const x1 = n00 + (n10 - n00) * u, x2 = n01 + (n11 - n01) * u;
+    return x1 + (x2 - x1) * v;
+  };
+}
+
+// fbm (fractal Brownian motion): tindan beberapa lapis noise.
+// Lapis 1 = bentuk besar. Lapis 2 = 2x lebih halus, separuh kuat. Dan seterusnya.
+// Hasilnya: bukit besar + bonggol kecil atas bukit, macam alam sebenar.
+function fbm(n, x, y, octaves) {
+  let sum = 0, amp = 1, freq = 1, total = 0;
+  for (let i = 0; i < octaves; i++) {
+    sum += amp * n(x * freq, y * freq);
+    total += amp;
+    amp *= 0.5;     // setiap lapis separuh kuat
+    freq *= 2.03;   // dan ~2x lebih halus
+  }
+  return sum / total;
+}
+
+// Fungsi kecil yang kerap diguna
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;          // kunci nilai antara a dan b
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }; // peralihan licin 0 -> 1
+
+// =====================================================================
+// B. FORMULA DUNIA: H(x, z) -> tinggi tanah
+//    Ni JANTUNG game. Tanah, fizik, kamera, peta mini: semua guna fungsi ni.
+//    Tak ada peta disimpan. Setiap tinggi dikira bila perlu.
+// =====================================================================
+
+// 4 noise berasingan (seed lain-lain) untuk 4 tujuan
+const nC = makePerlin(SEED);       // benua: darat atau laut
+const nD = makePerlin(SEED + 1);   // detail: bonggol kecil
+const nM = makePerlin(SEED + 2);   // gunung: banjaran
+const nF = makePerlin(SEED + 3);   // hutan: mana tumbuh pokok
+
+function H(x, z) {
+  // c: lapis benua, sangat besar (0.0021 = berubah perlahan). Bawah ~-0.08 jadi laut.
+  const c = fbm(nC, x * 0.0021 + 3.1, z * 0.0021 - 7.3, 3);
+  // d: bonggol kecil
+  const d = fbm(nD, x * 0.011, z * 0.011, 3);
+  // r: "ridged noise". 1 - |noise| hasilkan garisan tajam, macam rabung gunung
+  const r = 1 - Math.abs(fbm(nM, x * 0.0065, z * 0.0065, 2) * 1.6);
+  // inland: 0 dekat pantai, 1 jauh ke tengah pulau. Gunung cuma tumbuh kat tengah.
+  const inland = sstep(0.02, 0.3, c);
+  let h = (c + 0.08) * 62 + d * 7 * (0.4 + inland);
+  const rr = Math.max(0, r);
+  h += inland * rr * rr * rr * 48; // kuasa 3 = rabung tajam, lembah landai
+  return h;
+}
+
+// Paras salji, sedikit beralun supaya garis salji tak lurus
+function snowLine(x, z) { return 40 + nD(x * 0.03 + 50, z * 0.03) * 8; }
+
+// =====================================================================
+// C. SIMPANAN: localStorage (storan kecil dalam browser)
+// =====================================================================
+const KEY = 'pulau-pelita-v1';
+let saved = {};
+// try/catch: localStorage boleh gagal (mod incognito dll). Game tetap jalan.
+try { saved = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { saved = {}; }
+// Set = senarai tanpa ulangan. Simpan ID chunk yang pelitanya dah diambil.
+const collected = new Set(saved.collected || []);
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify({
+      collected: [...collected],
+      pos: [player.position.x, player.position.z],
+      dayT: dayT
+    }));
+  } catch (e) {}
+}
+
+// =====================================================================
+// D. RENDERER, SCENE, CAHAYA, LANGIT, AIR
+// =====================================================================
+
+// Phone (skrin sentuh) dapat tetapan lebih ringan
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
+const CH = 48;               // saiz satu chunk (unit dunia)
+const SEG = 24;              // grid 24 x 24 petak setiap chunk
+const R = IS_TOUCH ? 3 : 4;  // radius chunk yang dimuat sekeliling pemain
+
+const canvas = document.getElementById('game');
+// Renderer = "tukang lukis" yang hantar kerja ke GPU
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !IS_TOUCH, powerPreference: 'high-performance' });
+// Hadkan resolusi supaya phone tak terbeban
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 1.75));
+renderer.setSize(innerWidth, innerHeight, false);
+
+// Scene = "dunia" yang menyimpan semua objek
+const scene = new THREE.Scene();
+// Kabus: mula pudar kat 35% jarak, hilang terus kat hujung. Sorok tepi dunia.
+const FOG_FAR = R * CH * 0.95;
+scene.fog = new THREE.Fog(0x87c4ea, FOG_FAR * 0.35, FOG_FAR);
+scene.background = new THREE.Color(0x87c4ea);
+
+// Kamera: sudut pandang 62 darjah, lukis benda antara 0.1 dan 900 unit
+const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 900);
+
+// Cahaya: hemisphere (langit biru atas, tanah hijau bawah), matahari dan bulan
+const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x4a5a3a, 0.6); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.0); scene.add(sun); scene.add(sun.target);
+const moon = new THREE.DirectionalLight(0x8fa8ff, 0.0); scene.add(moon); scene.add(moon.target);
+
+// glowTex: lukis bulatan bercahaya atas canvas 64x64, jadikan tekstur.
+// Ni contoh "aset dijana guna kod": tak ada fail gambar langsung.
+function glowTex(inner, outer) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, inner); gr.addColorStop(0.35, outer); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+const lampGlow = glowTex('rgba(255,240,190,1)', 'rgba(255,170,60,0.45)');
+
+// Sprite = gambar 2D yang sentiasa menghadap kamera. Guna untuk matahari & bulan.
+// AdditiveBlending = warna ditambah (jadi lebih terang), macam cahaya sebenar.
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,252,235,1)', 'rgba(255,220,150,0.5)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+sunSprite.scale.setScalar(90); scene.add(sunSprite);
+const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(235,240,255,1)', 'rgba(150,170,255,0.35)'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false }));
+moonSprite.scale.setScalar(50); scene.add(moonSprite);
+
+// Bintang: 900 titik rawak atas kubah langit
+const starGeo = new THREE.BufferGeometry();
+{
+  const n = 900, arr = new Float32Array(n * 3), r = mulberry32(99);
+  for (let i = 0; i < n; i++) {
+    const u = r() * 2 - 1, a = r() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+    arr[i * 3] = Math.cos(a) * s * 500;
+    arr[i * 3 + 1] = Math.abs(u) * 500 + 20;   // separuh atas sahaja
+    arr[i * 3 + 2] = Math.sin(a) * s * 500;
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+}
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false });
+const stars = new THREE.Points(starGeo, starMat); scene.add(stars);
+
+// Air: satu kepingan rata besar separa lutsinar di y = 0. Ikut pemain ke mana-mana.
+const waterMat = new THREE.MeshLambertMaterial({ color: 0x2a86b0, transparent: true, opacity: 0.8 });
+const water = new THREE.Mesh(new THREE.PlaneGeometry(1400, 1400, 1, 1).rotateX(-Math.PI / 2), waterMat);
+water.renderOrder = 1; // lukis selepas tanah supaya dasar laut nampak melalui air
+scene.add(water);
+
+// =====================================================================
+// E. BENTUK KONGSI: dicipta sekali, diguna beribu kali
+// =====================================================================
+
+// flat(): pecahkan bucu supaya setiap segi tiga ada warna rata (gaya low-poly)
+function flat(geo) { const g = geo.index ? geo.toNonIndexed() : geo; g.computeVertexNormals(); return g; }
+
+// colored(): cat seluruh bentuk dengan satu warna (warna disimpan dalam setiap bucu)
+function colored(geo, hex) {
+  const g = flat(geo), n = g.attributes.position.count;
+  const col = new Float32Array(n * 3), c = new THREE.Color(hex);
+  for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+
+// merge(): cantum beberapa bentuk jadi SATU (contoh batang + daun = satu pokok)
+// supaya GPU lukis satu objek, bukan tiga.
+function merge(geos) {
+  let total = 0; geos.forEach(g => total += g.attributes.position.count);
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  let o = 0;
+  geos.forEach(g => {
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    col.set(g.attributes.color.array, o * 3);
+    o += g.attributes.position.count;
+  });
+  const m = new THREE.BufferGeometry();
+  m.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  m.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  m.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return m;
+}
+
+// Pokok bulat = silinder (batang) + 2 icosahedron (daun). translate() = alih ke atas.
+const roundTreeGeo = merge([
+  colored(new THREE.CylinderGeometry(0.22, 0.34, 2.2, 5).translate(0, 1.1, 0), 0x7a5236),
+  colored(new THREE.IcosahedronGeometry(1.7, 0).translate(0, 3.1, 0), 0x5fae4a),
+  colored(new THREE.IcosahedronGeometry(1.1, 0).translate(0.7, 4.0, 0.3), 0x6cbd52)
+]);
+// Pokok pain = batang + 2 kon bertingkat
+const pineGeo = merge([
+  colored(new THREE.CylinderGeometry(0.2, 0.3, 1.6, 5).translate(0, 0.8, 0), 0x6b4630),
+  colored(new THREE.ConeGeometry(1.7, 3.0, 7).translate(0, 2.8, 0), 0x2f7a4a),
+  colored(new THREE.ConeGeometry(1.2, 2.4, 7).translate(0, 4.4, 0), 0x378a53)
+]);
+const rockGeo = colored(new THREE.DodecahedronGeometry(1, 0).scale(1, 0.7, 1), 0x8d8a84);
+const pillarGeo = colored(new THREE.BoxGeometry(1.1, 5, 1.1).translate(0, 2.5, 0), 0xb9ab93);
+
+// Lambert = material ringan (cahaya dikira setiap bucu, bukan setiap piksel)
+const instMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+const terrainMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+// Bahagian pelita: tapak batu, teras bercahaya, tiang cahaya, cahaya kabur
+const pedestalGeo = flat(new THREE.CylinderGeometry(0.45, 0.7, 1.0, 6).translate(0, 0.5, 0));
+const pedestalMat = new THREE.MeshLambertMaterial({ color: 0x9c907c });
+const coreGeo = new THREE.OctahedronGeometry(0.42, 0);
+const coreMat = new THREE.MeshBasicMaterial({ color: 0xffd27a }); // Basic = tak terjejas cahaya (sentiasa terang)
+const beamGeo = new THREE.CylinderGeometry(0.3, 0.3, 80, 8, 1, true).translate(0, 40, 0);
+// fog:false = tiang cahaya nampak walaupun dalam kabus, supaya pemain boleh cari dari jauh
+const beamMat = new THREE.MeshBasicMaterial({ color: 0xffc35e, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide });
+const glowMat = new THREE.SpriteMaterial({ map: lampGlow, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+
+// =====================================================================
+// F. CHUNK: dunia dipecah jadi petak 48 x 48. Cuma yang dekat dibina.
+// =====================================================================
+const chunks = new Map();            // "cx,cz" -> data chunk
+const dummy = new THREE.Object3D();  // objek bantu untuk kira matriks kedudukan
+const tmpC = new THREE.Color();
+
+// hash2: tukar koordinat chunk jadi seed unik. Chunk sama -> seed sama -> pokok sama tempat.
+function hash2(x, z) {
+  let h = (Math.imul(x, 73856093) ^ Math.imul(z, 19349663) ^ SEED) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 2246822507) >>> 0;
+  return h;
+}
+
+// Warna tanah ikut tinggi & kecuraman. Tulis terus ke array out kat kedudukan i.
+function terrainColor(h, slope, x, z, out, i) {
+  const v = nD(x * 0.09 + 11, z * 0.09 - 5) * 0.08; // variasi kecil supaya tak rata sangat
+  const sl = snowLine(x, z);
+  let r, g, b;
+  if (h < -1.5) {                    // dasar laut: makin dalam makin gelap
+    const t = clamp((-h - 1.5) / 14, 0, 1);
+    r = 0.66 - 0.34 * t; g = 0.6 - 0.28 * t; b = 0.44 - 0.14 * t;
+  } else if (h < 1.8) {              // pasir pantai
+    r = 0.9; g = 0.81; b = 0.57;
+  } else if (h < sl - 12) {          // rumput: makin tinggi makin gelap
+    const t = clamp((h - 1.8) / 26, 0, 1);
+    r = 0.40 - 0.14 * t; g = 0.66 - 0.2 * t; b = 0.28 - 0.07 * t;
+  } else if (h < sl) {               // batu
+    r = 0.52; g = 0.48; b = 0.43;
+  } else {                           // salji
+    r = 0.95; g = 0.96; b = 0.99;
+  }
+  if (slope > 0.95 && h > 1.8 && h < sl) { r = 0.5; g = 0.46; b = 0.42; } // tebing curam = batu
+  out[i] = r + v; out[i + 1] = g + v; out[i + 2] = b + v * 0.6;
+}
+
+// makeInst: INSTANCING. Satu bentuk dilukis banyak kali dalam SATU arahan GPU.
+// Setiap item dalam list: [x, y, z, saiz, putaran, warna, condongX, condongZ, regangan]
+function makeInst(group, geo, list) {
+  if (!list.length) return;
+  const m = new THREE.InstancedMesh(geo, instMat, list.length);
+  list.forEach((d, i) => {
+    dummy.position.set(d[0], d[1], d[2]);
+    dummy.rotation.set(d[6] || 0, d[4], d[7] || 0);
+    dummy.scale.set(d[3], d[3] * (d[8] || 1), d[3]);
+    dummy.updateMatrix();
+    m.setMatrixAt(i, dummy.matrix);              // kedudukan + putaran + saiz salinan ke-i
+    tmpC.setRGB(d[5][0], d[5][1], d[5][2]);
+    m.setColorAt(i, tmpC);                       // warna salinan ke-i
+  });
+  m.instanceMatrix.needsUpdate = true;
+  if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  m.frustumCulled = false; // three.js r128 salah kira sempadan instance, jadi matikan culling
+  group.add(m);
+}
+
+// buildChunk: bina SATU petak dunia: tanah + pokok + batu + pelita + batu purba
+function buildChunk(cx, cz) {
+  const group = new THREE.Group();
+  const N = SEG, step = CH / N, ox = cx * CH, oz = cz * CH, W = N + 3;
+
+  // 1) Kira tinggi untuk grid (+1 petak tepi setiap sisi untuk kira kecuraman)
+  const hs = new Float32Array(W * W);
+  for (let j = 0; j < W; j++)
+    for (let i = 0; i < W; i++)
+      hs[j * W + i] = H(ox + (i - 1) * step, oz + (j - 1) * step);
+
+  // 2) Bucu tanah: kedudukan (x, tinggi, z) + warna
+  const V = (N + 1) * (N + 1);
+  const pos = new Float32Array(V * 3), col = new Float32Array(V * 3);
+  let maxH = -99;
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const k = j * (N + 1) + i, h = hs[(j + 1) * W + i + 1];
+    // kecuraman = beza tinggi jiran kiri-kanan dan atas-bawah
+    const dx = hs[(j + 1) * W + i + 2] - hs[(j + 1) * W + i];
+    const dz = hs[(j + 2) * W + i + 1] - hs[j * W + i + 1];
+    const slope = Math.hypot(dx, dz) / (2 * step);
+    const x = ox + i * step, z = oz + j * step;
+    pos[k * 3] = x; pos[k * 3 + 1] = h; pos[k * 3 + 2] = z;
+    if (h > maxH) maxH = h;
+    terrainColor(h, slope, x, z, col, k * 3);
+  }
+
+  // 3) Sambung bucu jadi segi tiga: setiap petak grid = 2 segi tiga
+  const idx = [];
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = j * (N + 1) + i, b = a + 1, c = a + N + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d); // urutan ni buat permukaan menghadap ke atas
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(idx);
+  const g2 = geo.toNonIndexed(); geo.dispose(); g2.computeVertexNormals(); // gaya low-poly bersegi
+  const terrain = new THREE.Mesh(g2, terrainMat);
+  group.add(terrain);
+
+  const chunk = { cx, cz, group, terrain, lantern: null };
+
+  // 4) Objek atas tanah (skip kalau chunk ni laut sepenuhnya)
+  if (maxH > -1) {
+    // Penjana rawak KHAS chunk ni: sentiasa keluar nombor sama untuk chunk sama
+    const rnd = mulberry32(hash2(cx, cz));
+    const round = [], pine = [], rocks = [], pillars = [];
+
+    // Pokok: cuba 48 tempat rawak, simpan yang lulus syarat
+    for (let k = 0; k < 48; k++) {
+      const x = ox + rnd() * CH, z = oz + rnd() * CH, h = H(x, z), f = nF(x * 0.012, z * 0.012);
+      const keep = rnd(), s = 0.7 + rnd() * 0.75, rot = rnd() * 6.283, tint = rnd();
+      // syarat: atas pantai, bawah salji, kawasan hutan (f), dan 85% peluang
+      if (h > 2.2 && h < snowLine(x, z) - 10 && f > -0.06 && keep < 0.85) {
+        const usePine = h > 16 || (f > 0.28 && tint < 0.6); // tempat tinggi = pain
+        const c = usePine ? [0.85 + tint * 0.2, 0.95, 0.85 + tint * 0.15] : [0.9 + tint * 0.2, 0.92 + tint * 0.12, 0.75 + tint * 0.2];
+        (usePine ? pine : round).push([x, h - 0.15, z, s, rot, c]);
+      }
+    }
+    // Batu
+    for (let k = 0; k < 6; k++) {
+      const x = ox + rnd() * CH, z = oz + rnd() * CH, h = H(x, z), s = 0.4 + rnd() * 1.5, rot = rnd() * 6.283, t = rnd();
+      if (h > -4 && t < 0.75) rocks.push([x, h - 0.2 * s, z, s, rot, [0.85 + t * 0.25, 0.85 + t * 0.22, 0.85 + t * 0.2]]);
+    }
+    // Pelita: ~34% chunk ada satu, mesti atas darat
+    if (rnd() < 0.34) {
+      for (let k = 0; k < 8; k++) {
+        const x = ox + 4 + rnd() * (CH - 8), z = oz + 4 + rnd() * (CH - 8), h = H(x, z);
+        if (h > 1.0) {
+          const id = cx + ':' + cz; // ID pelita = koordinat chunk
+          if (!collected.has(id)) { // dah diambil? jangan letak
+            const lg = new THREE.Group(); lg.position.set(x, h, z);
+            lg.add(new THREE.Mesh(pedestalGeo, pedestalMat));
+            const core = new THREE.Mesh(coreGeo, coreMat); core.position.y = 2.0; lg.add(core);
+            const glow = new THREE.Sprite(glowMat); glow.scale.setScalar(3.2); glow.position.y = 2.0; lg.add(glow);
+            const beam = new THREE.Mesh(beamGeo, beamMat); beam.position.y = 2.0; lg.add(beam);
+            group.add(lg);
+            chunk.lantern = { id, x, z, h, group: lg, core, glow, phase: rnd() * 6.28 };
+          }
+          break;
+        }
+      }
+    }
+    // Bulatan batu purba: 6% peluang, hanya atas tanah rata
+    if (rnd() < 0.06) {
+      const x = ox + 12 + rnd() * 24, z = oz + 12 + rnd() * 24, h = H(x, z);
+      const rata = Math.abs(H(x + 7, z) - h) < 3 && Math.abs(H(x, z + 7) - h) < 3 && Math.abs(H(x - 7, z - 7) - h) < 3;
+      if (h > 2.5 && h < 24 && rata) {
+        const n = 7, rad = 6.5;
+        for (let k = 0; k < n; k++) {
+          const a = k / n * 6.283 + rnd() * 0.2, px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad, ph = H(px, pz);
+          const fallen = rnd() < 0.25, hs2 = 0.6 + rnd() * 0.5, t = rnd();
+          if (fallen) pillars.push([px, ph + 0.4, pz, 1, a, [0.9 + t * 0.1, 0.9 + t * 0.1, 0.9 + t * 0.1], 0, 1.45, 0.9]); // tumbang
+          else pillars.push([px, ph - 0.3, pz, 1, a + 0.4, [0.92 + t * 0.1, 0.92 + t * 0.1, 0.9 + t * 0.1], 0, 0, hs2]);
+        }
+      }
+    }
+    makeInst(group, roundTreeGeo, round);
+    makeInst(group, pineGeo, pine);
+    makeInst(group, rockGeo, rocks);
+    makeInst(group, pillarGeo, pillars);
+  }
+  scene.add(group);
+  chunks.set(cx + ',' + cz, chunk);
+}
+
+// Buang chunk dari scene & bebaskan memori GPU
+function disposeChunk(key) {
+  const ch = chunks.get(key); if (!ch) return;
+  scene.remove(ch.group);
+  ch.terrain.geometry.dispose();
+  ch.group.children.forEach(o => { if (o.isInstancedMesh && o.dispose) o.dispose(); });
+  chunks.delete(key);
+}
+
+// updateChunks: bila pemain masuk chunk baru, buang yang jauh, beratur bina yang baru.
+// budget = berapa chunk boleh dibina frame ni (2 je, supaya game tak tersekat)
+let lastCX = null, lastCZ = null, queue = [];
+function updateChunks(px, pz, budget) {
+  const pcx = Math.floor(px / CH), pcz = Math.floor(pz / CH);
+  if (pcx !== lastCX || pcz !== lastCZ) {
+    lastCX = pcx; lastCZ = pcz;
+    for (const [key, ch] of chunks) {
+      if (Math.max(Math.abs(ch.cx - pcx), Math.abs(ch.cz - pcz)) > R + 1) disposeChunk(key);
+    }
+    queue = [];
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) {
+      if (dx * dx + dz * dz > (R + 0.6) * (R + 0.6)) continue; // bentuk bulat, bukan segi empat
+      const k = (pcx + dx) + ',' + (pcz + dz);
+      if (!chunks.has(k)) queue.push([pcx + dx, pcz + dz, dx * dx + dz * dz]);
+    }
+    queue.sort((a, b) => a[2] - b[2]); // yang paling dekat dibina dulu
+  }
+  let n = 0;
+  while (queue.length && n < budget) {
+    const q = queue.shift();
+    if (!chunks.has(q[0] + ',' + q[1])) buildChunk(q[0], q[1]);
+    n++;
+  }
+}
+
+// =====================================================================
+// G. WATAK PEMAIN: dicantum dari bentuk asas
+// =====================================================================
+const player = new THREE.Group(); scene.add(player);
+const cloakMat = new THREE.MeshLambertMaterial({ color: 0x34508f });
+const skinMat = new THREE.MeshLambertMaterial({ color: 0xd9a273 });
+const hatMat = new THREE.MeshLambertMaterial({ color: 0xd8b45a });
+const legMat = new THREE.MeshLambertMaterial({ color: 0x2a2f3d });
+
+const body = new THREE.Mesh(flat(new THREE.CylinderGeometry(0.32, 0.5, 1.05, 8)), cloakMat); body.position.y = 1.12; player.add(body);
+const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), skinMat); head.position.y = 1.92; player.add(head);
+const hat = new THREE.Mesh(flat(new THREE.ConeGeometry(0.62, 0.42, 10)), hatMat); hat.position.y = 2.22; player.add(hat);
+const scarf = new THREE.Mesh(flat(new THREE.BoxGeometry(0.22, 0.5, 0.06)), new THREE.MeshLambertMaterial({ color: 0xc2452d }));
+scarf.position.set(0.12, 1.45, -0.38); scarf.rotation.x = -0.35; player.add(scarf);
+// Hidung kat +z: tunjuk arah depan watak
+const nose = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), skinMat); nose.position.set(0, 1.9, 0.29); player.add(nose);
+
+// Kaki: pivot (titik pusing) kat pinggul, kaki tergantung ke bawah. Pusing pivot = kaki berayun.
+function makeLeg(x) {
+  const pivot = new THREE.Group(); pivot.position.set(x, 0.65, 0);
+  const m = new THREE.Mesh(flat(new THREE.BoxGeometry(0.17, 0.65, 0.2)), legMat); m.position.y = -0.32;
+  pivot.add(m); player.add(pivot); return pivot;
+}
+const legL = makeLeg(-0.16), legR = makeLeg(0.16);
+
+// Lampu tangan + PointLight (cahaya sebenar yang terangi kawasan sekeliling waktu malam)
+const handLamp = new THREE.Mesh(new THREE.OctahedronGeometry(0.13, 0), coreMat); handLamp.position.set(0.5, 1.05, 0.15); player.add(handLamp);
+const handGlow = new THREE.Sprite(glowMat); handGlow.scale.setScalar(0.9); handGlow.position.copy(handLamp.position); player.add(handGlow);
+const playerLight = new THREE.PointLight(0xffbf6b, 0, 14, 1.6); playerLight.position.set(0.5, 1.6, 0.3); player.add(playerLight);
+
+// Cari tempat mula: pusing keluar dari (0,0) sampai jumpa tanah rendah atas pantai
+function findSpawn() {
+  for (let r = 0; r < 3000; r += 6) for (let a = 0; a < 6.283; a += 0.3) {
+    const x = Math.cos(a) * r, z = Math.sin(a) * r, h = H(x, z);
+    if (h > 2.5 && h < 9) return [x, z];
+  }
+  return [0, 0];
+}
+const startPos = saved.pos || findSpawn();
+player.position.set(startPos[0], H(startPos[0], startPos[1]), startPos[1]);
+const vel = new THREE.Vector3();               // halaju (untuk lompat & graviti)
+let grounded = true, swimming = false, facing = 0, walkPhase = 0;
+
+// =====================================================================
+// H. KAWALAN
+// =====================================================================
+// Kamera orbit: yaw = pusing kiri-kanan, pitch = dongak-tunduk, dist = jarak
+let yaw = 0.6, pitch = 0.32, dist = IS_TOUCH ? 10 : 9;
+const camTarget = player.position.clone().add(new THREE.Vector3(0, 1.6, 0));
+
+const keys = {};          // kekunci yang sedang ditekan: keys.KeyW = true
+let running = false, playing = false;
+const joyVec = { x: 0, y: 0 }; // arah joystick (-1..1)
+
+addEventListener('keydown', e => {
+  if (e.code === 'Escape') { if (playing) showIntro(); return; }
+  if (!playing) return;
+  keys[e.code] = true;
+  // elak page scroll bila tekan Space / anak panah
+  if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; }); // tukar tab = lepas semua kekunci
+
+// Pointer events: satu sistem untuk tetikus DAN jari.
+// Jari kiri skrin = joystick. Lain-lain (termasuk tetikus) = pusing kamera.
+const joyEl = document.getElementById('joy'), joyKnob = document.getElementById('joyKnob');
+let joyId = null, joyOrigin = null, camId = null, camLast = null;
+
+canvas.addEventListener('pointerdown', e => {
+  if (!playing) return;
+  if (e.pointerType !== 'mouse' && e.clientX < innerWidth * 0.45 && joyId === null) {
+    joyId = e.pointerId; joyOrigin = { x: e.clientX, y: e.clientY };
+    joyEl.style.left = e.clientX + 'px'; joyEl.style.top = e.clientY + 'px';
+    joyEl.hidden = false; joyKnob.style.transform = 'translate(0,0)';
+  } else if (camId === null) {
+    camId = e.pointerId; camLast = { x: e.clientX, y: e.clientY };
+  }
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {} // terus terima gerakan walaupun jari keluar kanvas
+});
+canvas.addEventListener('pointermove', e => {
+  if (e.pointerId === joyId) {
+    let dx = e.clientX - joyOrigin.x, dy = e.clientY - joyOrigin.y;
+    const l = Math.hypot(dx, dy), m = 50;       // jejari maksimum 50px
+    if (l > m) { dx *= m / l; dy *= m / l; }
+    joyVec.x = dx / m; joyVec.y = dy / m;
+    joyKnob.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+  } else if (e.pointerId === camId) {
+    const s = e.pointerType === 'mouse' ? 0.0055 : 0.0075; // kepekaan
+    yaw -= (e.clientX - camLast.x) * s;
+    pitch = clamp(pitch + (e.clientY - camLast.y) * s * 0.8, -0.05, 1.25);
+    camLast = { x: e.clientX, y: e.clientY };
+  }
+});
+function endPointer(e) {
+  if (e.pointerId === joyId) { joyId = null; joyVec.x = joyVec.y = 0; joyEl.hidden = true; }
+  if (e.pointerId === camId) camId = null;
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+// Roda tetikus = zum (passive:false supaya boleh preventDefault, elak page scroll)
+canvas.addEventListener('wheel', e => { e.preventDefault(); dist = clamp(dist + e.deltaY * 0.01, 4, 22); }, { passive: false });
+
+let jumpQueued = false;
+const btnJump = document.getElementById('btnJump'), btnRun = document.getElementById('btnRun');
+btnJump.addEventListener('pointerdown', e => { e.preventDefault(); jumpQueued = true; });
+btnRun.addEventListener('pointerdown', e => { e.preventDefault(); running = !running; btnRun.classList.toggle('on', running); });
+
+// =====================================================================
+// I. BUNYI: dijana guna Web Audio (tak ada fail mp3)
+// =====================================================================
+let actx = null, muted = false;
+const btnSound = document.getElementById('btnSound');
+btnSound.addEventListener('click', () => { muted = !muted; btnSound.textContent = 'Bunyi: ' + (muted ? 'Off' : 'On'); });
+
+// tone: main beberapa nota berturutan. freqs = frekuensi (Hz), gap = jarak antara nota
+function tone(freqs, gap, vol, len, type) {
+  if (!actx || muted) return;
+  const now = actx.currentTime;
+  freqs.forEach((f, i) => {
+    const o = actx.createOscillator(), g = actx.createGain(); // oscillator = penjana gelombang bunyi
+    o.type = type || 'sine'; o.frequency.value = f;
+    const t = now + i * gap;
+    // "envelope": naik cepat, pudar perlahan (bunyi macam loceng)
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g); g.connect(actx.destination);
+    o.start(t); o.stop(t + len + 0.05);
+  });
+}
+
+// =====================================================================
+// J. HUD & PETA MINI
+// =====================================================================
+const elCount = document.getElementById('count'), elClock = document.getElementById('clock'), elCoords = document.getElementById('coords');
+const elSeekText = document.getElementById('seekText'), elSeekArrow = document.getElementById('seekArrow'), elToast = document.getElementById('toast');
+const intro = document.getElementById('intro'), startBtn = document.getElementById('startBtn'), touchBtns = document.getElementById('touchBtns');
+elCount.textContent = collected.size;
+
+let toastTimer = null;
+function toast(main, sub) {
+  elToast.innerHTML = ''; elToast.append(main);
+  if (sub) { const s = document.createElement('span'); s.textContent = sub; elToast.append(s); }
+  elToast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => elToast.classList.remove('show'), 2200);
+}
+
+function showIntro() {
+  playing = false; intro.hidden = false; startBtn.textContent = 'Sambung jelajah';
+  touchBtns.hidden = true; for (const k in keys) keys[k] = false;
+  joyVec.x = joyVec.y = 0; joyEl.hidden = true; save(); startBtn.focus();
+}
+startBtn.addEventListener('click', () => {
+  intro.hidden = true; playing = true; if (IS_TOUCH) touchBtns.hidden = false;
+  // Browser hanya benarkan bunyi SELEPAS pemain tekan sesuatu. Sebab tu audio dimulakan kat sini.
+  try {
+    if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) actx = new AC(); }
+    if (actx && actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+});
+
+// Peta mini: lukis 66 x 66 piksel kecil (setiap piksel = 4 unit dunia), lepas tu besarkan
+const map = document.getElementById('map'), mctx = map.getContext('2d');
+const MS = 66, mImg = document.createElement('canvas'); mImg.width = mImg.height = MS;
+const mictx = mImg.getContext('2d'), mData = mictx.createImageData(MS, MS);
+const MAP_SCALE = 4;
+let nearestL = null, mapLast = -1e9, mapPX = 1e9, mapPZ = 1e9;
+
+function mapColor(h, x, z, o, i) {
+  let r, g, b;
+  if (h < 0) { const t = clamp(-h / 20, 0, 1); r = 40 - 20 * t; g = 120 - 60 * t; b = 170 - 60 * t; }
+  else if (h < 1.8) { r = 226; g = 205; b = 146; }
+  else if (h < snowLine(x, z) - 12) { const t = clamp(h / 26, 0, 1); r = 100 - 36 * t; g = 168 - 50 * t; b = 74 - 20 * t; }
+  else if (h < snowLine(x, z)) { r = 134; g = 124; b = 112; }
+  else { r = 240; g = 243; b = 250; }
+  o[i] = r; o[i + 1] = g; o[i + 2] = b; o[i + 3] = 255; // RGBA
+}
+
+function drawMap(now, force) {
+  const p = player.position;
+  // Kira semula gambar peta hanya bila pemain dah bergerak > 2 unit (jimat kerja)
+  if (force || (now - mapLast > 350 && (Math.abs(p.x - mapPX) > 2 || Math.abs(p.z - mapPZ) > 2))) {
+    mapLast = now; mapPX = p.x; mapPZ = p.z;
+    const d = mData.data;
+    for (let j = 0; j < MS; j++) for (let i = 0; i < MS; i++) {
+      const x = p.x + (i - MS / 2) * MAP_SCALE, z = p.z + (j - MS / 2) * MAP_SCALE;
+      mapColor(H(x, z), x, z, d, (j * MS + i) * 4); // formula H yang SAMA!
+    }
+    mictx.putImageData(mData, 0, 0);
+  }
+  const W = map.width, c = W / 2, k = W / (MS * MAP_SCALE);
+  mctx.save();
+  mctx.clearRect(0, 0, W, W);
+  mctx.beginPath(); mctx.arc(c, c, c, 0, Math.PI * 2); mctx.clip(); // potong jadi bulat
+  mctx.imageSmoothingEnabled = true;
+  mctx.drawImage(mImg, (mapPX - p.x) * k, (mapPZ - p.z) * k, W, W);
+  // Titik pelita. Yang luar peta tak dilukis, kecuali pelita terdekat (dilekat kat tepi)
+  for (const ch of chunks.values()) {
+    const L = ch.lantern; if (!L || L.done) continue;
+    let dx = (L.x - p.x) * k, dz = (L.z - p.z) * k;
+    const l = Math.hypot(dx, dz);
+    if (l > c - 10) { if (L !== nearestL) continue; dx *= (c - 10) / l; dz *= (c - 10) / l; }
+    mctx.beginPath(); mctx.arc(c + dx, c + dz, 7, 0, Math.PI * 2);
+    mctx.fillStyle = '#ffc65c'; mctx.fill();
+    mctx.lineWidth = 2.5; mctx.strokeStyle = 'rgba(60,30,0,.7)'; mctx.stroke();
+  }
+  // Kon pandangan kamera (segitiga pudar)
+  mctx.translate(c, c);
+  mctx.save(); mctx.rotate(-yaw);
+  mctx.beginPath(); mctx.moveTo(0, 0); mctx.arc(0, 0, 60, -Math.PI / 2 - 0.5, -Math.PI / 2 + 0.5); mctx.closePath();
+  mctx.fillStyle = 'rgba(255,255,255,.14)'; mctx.fill();
+  mctx.restore();
+  // Anak panah pemain, dipusing ikut arah watak
+  mctx.rotate(Math.PI - facing);
+  mctx.beginPath(); mctx.moveTo(0, -14); mctx.lineTo(10, 10); mctx.lineTo(0, 5); mctx.lineTo(-10, 10); mctx.closePath();
+  mctx.fillStyle = '#fff'; mctx.fill(); mctx.lineWidth = 3; mctx.strokeStyle = '#0e1726'; mctx.stroke();
+  mctx.restore();
+  // Huruf U (Utara) kat atas
+  mctx.fillStyle = 'rgba(14,23,38,.75)'; mctx.beginPath(); mctx.arc(c, 20, 15, 0, Math.PI * 2); mctx.fill();
+  mctx.fillStyle = '#ffc65c'; mctx.font = '700 18px Figtree, system-ui, sans-serif';
+  mctx.textAlign = 'center'; mctx.textBaseline = 'middle'; mctx.fillText('U', c, 21);
+}
+
+// =====================================================================
+// K. SIANG / MALAM
+//    dayT: 0 = tengah malam, 0.25 = subuh, 0.5 = tengah hari, 0.75 = senja
+// =====================================================================
+const DAY_LEN = 300; // satu hari = 300 saat (5 minit)
+let dayT = saved.dayT != null ? saved.dayT : 0.3;
+const cDay = new THREE.Color(0x87c4ea), cDusk = new THREE.Color(0xf09a6a), cNight = new THREE.Color(0x0b1631), cSky = new THREE.Color();
+const sunWhite = new THREE.Color(0xfff2d8), sunOrange = new THREE.Color(0xffa25a);
+const sunDir = new THREE.Vector3();
+let nightF = 0; // 0 = siang penuh, 1 = malam penuh
+
+function updateSky(dt) {
+  dayT = (dayT + dt / DAY_LEN) % 1;
+  const a = 2 * Math.PI * (dayT - 0.25);
+  const elev = Math.sin(a);                         // ketinggian matahari: -1 (bawah) .. 1 (atas)
+  sunDir.set(Math.cos(a) * 0.85, elev, 0.42).normalize();
+  const dayF = sstep(-0.14, 0.28, elev);            // berapa "siang" sekarang
+  const dusk = clamp(1 - Math.abs(elev) / 0.32, 0, 1); // paling kuat masa matahari kat ufuk
+  nightF = 1 - dayF;
+
+  // Warna langit = adun malam -> siang, lepas tu campur oren senja
+  cSky.copy(cNight).lerp(cDay, dayF).lerp(cDusk, dusk * 0.55);
+  scene.background.copy(cSky); scene.fog.color.copy(cSky);
+
+  const p = player.position;
+  sun.position.copy(p).addScaledVector(sunDir, 120); sun.target.position.copy(p);
+  moon.position.copy(p).addScaledVector(sunDir, -120); moon.target.position.copy(p); // bulan bertentangan matahari
+  sun.intensity = Math.max(0, elev + 0.08) * 1.05;
+  sun.color.copy(sunWhite).lerp(sunOrange, dusk);
+  moon.intensity = Math.max(0, -elev) * 0.38;
+  hemi.intensity = 0.22 + 0.48 * dayF;
+
+  starMat.opacity = clamp(nightF * 1.2 - 0.15, 0, 1);
+  stars.position.copy(camera.position); // bintang ikut kamera = nampak jauh tak terhingga
+  sunSprite.position.copy(camera.position).addScaledVector(sunDir, 600); sunSprite.visible = elev > -0.1;
+  moonSprite.position.copy(camera.position).addScaledVector(sunDir, -600); moonSprite.visible = elev < 0.1;
+
+  beamMat.opacity = 0.1 + 0.32 * nightF; // tiang pelita lebih terang waktu malam
+  playerLight.intensity = nightF * 1.5;
+  playerLight.distance = 12 + Math.min(collected.size, 40) * 0.6; // ganjaran: lebih banyak pelita, lampu lebih jauh
+  handGlow.visible = nightF > 0.25;
+
+  const hrs = (dayT * 24) % 24, hh = Math.floor(hrs), mm = Math.floor((hrs - hh) * 60);
+  elClock.textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+}
+
+// =====================================================================
+// L. UPDATE SETIAP FRAME
+// =====================================================================
+const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
+const fx = []; // animasi pelita yang sedang "terbang" selepas diambil
+
+// angDiff: beza sudut paling pendek (elak watak pusing 350 darjah bila cukup 10 darjah)
+function angDiff(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function updatePlayer(dt, time) {
+  // 1) Baca input: ix = kiri/kanan, iz = depan/belakang
+  let ix = 0, iz = 0;
+  if (playing) {
+    if (keys.KeyA || keys.ArrowLeft) ix -= 1;
+    if (keys.KeyD || keys.ArrowRight) ix += 1;
+    if (keys.KeyW || keys.ArrowUp) iz -= 1;
+    if (keys.KeyS || keys.ArrowDown) iz += 1;
+    ix += joyVec.x; iz += joyVec.y;
+  }
+  // 2) Tukar input ikut arah KAMERA (W = ke depan kamera, bukan ke utara)
+  fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+  right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+  move.set(0, 0, 0).addScaledVector(fwd, -iz).addScaledVector(right, ix);
+  let ml = move.length();
+  if (ml > 1) { move.divideScalar(ml); ml = 1; } // serong tak boleh lebih laju
+
+  const run = running || keys.ShiftLeft || keys.ShiftRight;
+  const speed = swimming ? 4.2 : (run ? 14 : 7.5);
+  const p = player.position;
+  // jarak = laju x masa. dt = masa sejak frame lepas, jadi laju sama kat PC laju atau lambat
+  p.x += move.x * speed * dt;
+  p.z += move.z * speed * dt;
+  // Pusing watak perlahan-lahan ke arah gerakan
+  if (ml > 0.05) facing += angDiff(facing, Math.atan2(move.x, move.z)) * Math.min(1, dt * 12);
+  player.rotation.y = facing;
+
+  // 3) Lompat & graviti
+  const wantJump = playing && (keys.Space || jumpQueued); jumpQueued = false;
+  if (wantJump && grounded && !swimming) { vel.y = 11.5; grounded = false; tone([520, 780], 0.04, 0.05, 0.18, 'triangle'); }
+  vel.y -= 30 * dt;      // graviti tarik ke bawah
+  p.y += vel.y * dt;
+
+  // 4) Pelanggaran dengan tanah, guna formula H lagi!
+  const g = H(p.x, p.z);
+  swimming = false;
+  if (g < -1.3 && p.y < -1.05) { p.y = -1.05; vel.y = Math.max(vel.y, 0); swimming = true; grounded = false; } // laut dalam: terapung
+  if (p.y <= g) { p.y = g; vel.y = 0; grounded = true; }                          // kaki tembus tanah: tolak naik
+  else if (grounded && vel.y <= 0 && p.y - g < 0.7) { p.y = g; vel.y = 0; }        // turun cerun: lekat kat tanah
+  else if (!swimming) grounded = false;                                            // tengah udara
+
+  // 5) Animasi jalan: kaki berayun ikut gelombang sin
+  const moving = ml * speed;
+  walkPhase += dt * (moving * 1.25 + 0.001);
+  const swing = Math.sin(walkPhase) * Math.min(1, moving / 6) * (grounded || swimming ? 0.75 : 0.2);
+  legL.rotation.x = swing; legR.rotation.x = -swing;
+  body.position.y = 1.12 + Math.abs(Math.cos(walkPhase)) * 0.06 * Math.min(1, moving / 6); // badan terangguk
+  scarf.rotation.x = -0.35 - Math.min(0.9, moving * 0.05) + Math.sin(time * 6) * 0.05;    // skaf berkibar
+  handLamp.position.y = 1.05 + Math.sin(walkPhase * 2) * 0.04; handGlow.position.copy(handLamp.position);
+
+  elCoords.textContent = 'X ' + Math.round(p.x) + ' · Z ' + Math.round(p.z) + ' · ' + (swimming ? 'berenang' : Math.max(0, Math.round(g)) + ' m');
+}
+
+function updateCamera(dt) {
+  if (!playing) yaw += dt * 0.05; // kat menu: kamera berpusing perlahan
+  // lerp: kamera kejar watak sikit-sikit (rasa smooth, bukan kaku)
+  camTarget.lerp(new THREE.Vector3(player.position.x, player.position.y + 1.6, player.position.z), Math.min(1, dt * 10));
+  // Kedudukan kamera atas sfera keliling watak (koordinat sfera -> x, y, z)
+  const cp = Math.cos(pitch);
+  camera.position.set(
+    camTarget.x + Math.sin(yaw) * cp * dist,
+    camTarget.y + Math.sin(pitch) * dist,
+    camTarget.z + Math.cos(yaw) * cp * dist
+  );
+  // Jangan biar kamera masuk dalam bukit atau bawah air
+  const gh = H(camera.position.x, camera.position.z);
+  if (camera.position.y < gh + 0.8) camera.position.y = gh + 0.8;
+  if (camera.position.y < 0.6) camera.position.y = 0.6;
+  camera.lookAt(camTarget);
+  // Air ikut pemain (dibulatkan supaya tak "bergetar")
+  water.position.set(Math.round(player.position.x / 20) * 20, 0, Math.round(player.position.z / 20) * 20);
+}
+
+function updateLanterns(dt, time) {
+  const p = player.position;
+  let best = null, bd = 1e9;
+  for (const ch of chunks.values()) {
+    const L = ch.lantern; if (!L || L.done) continue;
+    // Animasi: teras terapung naik turun & berpusing, cahaya berdenyut
+    L.core.position.y = 2.0 + Math.sin(time * 2 + L.phase) * 0.25;
+    L.core.rotation.y += dt * 1.5;
+    L.glow.position.y = L.core.position.y;
+    L.glow.scale.setScalar(3.0 + Math.sin(time * 3 + L.phase) * 0.3 + nightF * 1.5);
+
+    const dx = L.x - p.x, dz = L.z - p.z, dy = (L.h + 2) - (p.y + 1), d = Math.hypot(dx, dz);
+    // Cukup dekat? Ambil!
+    if (d < 2.4 && Math.abs(dy) < 3.2) {
+      L.done = true; collected.add(L.id); elCount.textContent = collected.size; save();
+      fx.push({ obj: L.group, t: 0 });
+      tone([880, 1318.5, 1760], 0.08, 0.14, 0.7); // ting-ting-ting
+      const n = collected.size;
+      if (n % 5 === 0) toast('Pelita ke-' + n + '!', 'Lampu kau makin terang waktu malam.');
+      else toast('+1 pelita', 'Jumlah: ' + n);
+      continue;
+    }
+    if (d < bd) { bd = d; best = L; } // jejak yang paling dekat
+  }
+  // Animasi pelita diambil: mengecil & terbang naik, lepas 0.6s buang
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i]; f.t += dt;
+    f.obj.scale.setScalar(Math.max(0.001, 1 - f.t * 1.6));
+    f.obj.position.y += dt * 3;
+    if (f.t > 0.6) { if (f.obj.parent) f.obj.parent.remove(f.obj); fx.splice(i, 1); }
+  }
+  // Anak panah HUD: tukar arah pelita ke sudut berbanding pandangan kamera
+  nearestL = best;
+  if (best) {
+    elSeekText.textContent = Math.round(bd) + ' m';
+    const dx = best.x - p.x, dz = best.z - p.z;
+    const rx = dx * right.x + dz * right.z;   // berapa jauh ke kanan kamera
+    const fz = dx * fwd.x + dz * fwd.z;       // berapa jauh ke depan kamera
+    elSeekArrow.style.transform = 'rotate(' + Math.atan2(rx, fz) + 'rad)';
+  } else {
+    elSeekText.textContent = 'teroka lagi…';
+    elSeekArrow.style.transform = 'rotate(0rad)';
+  }
+}
+
+// =====================================================================
+// M. GAME LOOP
+// =====================================================================
+// Sebelum frame pertama: bina SEMUA chunk sekeliling terus (budget 999)
+updateChunks(player.position.x, player.position.z, 999);
+updateSky(0); updateCamera(0.016); drawMap(0, true);
+
+addEventListener('resize', () => {
+  renderer.setSize(innerWidth, innerHeight, false);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+const clock = new THREE.Clock();
+let saveAcc = 0;
+function frame() {
+  requestAnimationFrame(frame);                        // minta browser panggil frame() lagi (~60x sesaat)
+  const dt = Math.min(clock.getDelta(), 0.05);         // masa sejak frame lepas (had 0.05s supaya tak "melompat")
+  const time = clock.elapsedTime;
+  updatePlayer(dt, time);                              // 1. gerak watak
+  updateChunks(player.position.x, player.position.z, 2); // 2. bina/buang kawasan
+  updateCamera(dt);                                    // 3. kamera ikut
+  updateSky(dt);                                       // 4. langit
+  updateLanterns(dt, time);                            // 5. pelita
+  drawMap(performance.now(), false);                   // 6. peta mini
+  saveAcc += dt; if (saveAcc > 5) { saveAcc = 0; save(); } // simpan setiap 5 saat
+  renderer.render(scene, camera);                      // 7. GPU lukis gambar!
+}
+frame();
+addEventListener('pagehide', save); // simpan bila tutup page
+
+})();
+</script>
+</body>
+</html>
